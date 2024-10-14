@@ -135,13 +135,13 @@ class TouchFolderLabel(Dataset):
 
     def __init__(self, root, transform=None, target_transform=None, two_crop=False, mode='train', label='full', data_amount=100):
         self.two_crop = two_crop
-        self.dataroot = '/media/common/datasets/touch_and_go/dataset/'
+        self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/'
         self.mode = mode
         if mode == 'train':
             with open(os.path.join(root, 'train.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'test':
-            with open(os.path.join(root, 'test.txt'),'r') as f:
+            with open(os.path.join(root, 'testOF.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'pretrain':
             with open(os.path.join(root, 'pretrain.txt'),'r') as f:
@@ -185,8 +185,10 @@ class TouchFolderLabel(Dataset):
             else:
                 target = 0
         
-        idx = os.path.basename(raw)
-        dir = self.dataroot + raw[:16]
+        # idx = os.path.basename(raw)
+        # dir = self.dataroot + raw[:16]
+        dir, idx = raw.split('/')
+        dir = os.path.join(self.dataroot, dir)
 
         # load image and gelsight
         A_img_path = os.path.join(dir, 'video_frame', idx)

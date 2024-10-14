@@ -388,53 +388,60 @@ def main():
             }
         wandb.watch(classifier)
 
-    # routine
-    for epoch in range(args.start_epoch, args.epochs + 1):
-
-        adjust_learning_rate(epoch, args, optimizer)
-        print("==> training...")
-
-        time1 = time.time()
-        train_acc, train_acc5, train_loss = train(epoch, train_loader, model, classifier, criterion, optimizer, args)
-        time2 = time.time()
-        print('train epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
-
-        print("==> testing...")
+    if args.classifier_path is not None:
+        print('==> Testing pre-trained classifier')
+        if args.test_modality == 'touch':
+            print('==> Test on touch modality')
         test_acc, test_acc5, test_loss = validate(val_loader, model, classifier, criterion, args)
+    else:
 
-        # wandb
-        if args.wandb:
-            wandb.log({"train_acc": train_acc, "train_loss": train_loss, "test_acc": test_acc, "test_loss": test_loss})
+        # routine
+        for epoch in range(args.start_epoch, args.epochs + 1):
 
-        # save the best model
-        if test_acc > best_acc1:
-            best_acc1 = test_acc
-            state = {
-                'opt': args,
-                'epoch': epoch,
-                'classifier': classifier.state_dict(),
-                'best_acc1': best_acc1,
-                'optimizer': optimizer.state_dict(),
-            }
-            save_name = '{}_layer{}.pth'.format(args.model, args.layer)
-            save_name = os.path.join(args.save_folder, save_name)
-            print('saving best model!')
-            torch.save(state, save_name)
+            adjust_learning_rate(epoch, args, optimizer)
+            print("==> training...")
 
-        # save model
-        if epoch % args.save_freq == 0:
-            print('==> Saving...')
-            state = {
-                'opt': args,
-                'epoch': epoch,
-                'classifier': classifier.state_dict(),
-                'best_acc1': test_acc,
-                'optimizer': optimizer.state_dict(),
-            }
-            save_name = 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch)
-            save_name = os.path.join(args.save_folder, save_name)
-            print('saving regular model!')
-            torch.save(state, save_name)
+            time1 = time.time()
+            train_acc, train_acc5, train_loss = train(epoch, train_loader, model, classifier, criterion, optimizer, args)
+            time2 = time.time()
+            print('train epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
+
+            print("==> testing...")
+            test_acc, test_acc5, test_loss = validate(val_loader, model, classifier, criterion, args)
+
+            # wandb
+            if args.wandb:
+                wandb.log({"train_acc": train_acc, "train_loss": train_loss, "test_acc": test_acc, "test_loss": test_loss})
+
+            # save the best model
+            if test_acc > best_acc1:
+                best_acc1 = test_acc
+                state = {
+                    'opt': args,
+                    'epoch': epoch,
+                    'classifier': classifier.state_dict(),
+                    'best_acc1': best_acc1,
+                    'optimizer': optimizer.state_dict(),
+                }
+                save_name = '{}_layer{}.pth'.format(args.model, args.layer)
+                save_name = os.path.join(args.save_folder, save_name)
+                print('saving best model!')
+                torch.save(state, save_name)
+
+            # save model
+            if epoch % args.save_freq == 0:
+                print('==> Saving...')
+                state = {
+                    'opt': args,
+                    'epoch': epoch,
+                    'classifier': classifier.state_dict(),
+                    'best_acc1': test_acc,
+                    'optimizer': optimizer.state_dict(),
+                }
+                save_name = 'ckpt_epoch_{epoch}.pth'.format(epoch=epoch)
+                save_name = os.path.join(args.save_folder, save_name)
+                print('saving regular model!')
+                torch.save(state, save_name)
 
 
 

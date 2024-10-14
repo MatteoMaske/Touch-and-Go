@@ -4,6 +4,8 @@ import math
 import numpy as np
 import torch.utils.model_zoo as model_zoo
 
+import lightning as L
+
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
 
@@ -398,3 +400,40 @@ class MyResNetsCMC(nn.Module):
 
     def forward(self, x, layer=7):
         return self.encoder(x, layer)
+    
+class LightningContrastiveNet(L.LightningModule):
+    def __init__(self, model, contrast, criterion_l, criterion_ab, args):
+        super().__init__()
+        self.model = model
+        self.contrast = contrast
+        self.criterion_l = criterion_l
+        self.criterion_ab = criterion_ab
+        self.args = args
+
+    def forward(self, x):
+        feat_l, feat_ab = self.model(x)
+        return feat_l, feat_ab
+
+    def training_step(self, batch, batch_idx):
+        inputs, _, index = batch
+        inputs = inputs.float()
+
+        feat_l, feat_ab = self.forward(inputs)
+        out_l, out_ab = self.contrast(feat_l, feat_ab, index)
+
+        # Compute losses
+        l_loss = self.criterion_l(out_l)
+        ab_loss = self.criterion_ab(out_ab)
+        loss = l_loss + ab_loss
+
+        # Log losses
+        self.log_dict({"train_loss": loss, "l_loss": l_loss, "ab_loss": ab_loss}, prog_bar=True, logger=True, on_step=True)
+
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.SGD(self.model.parameters(),
+                                lr=self.args.learning_rate,
+                                momentum=self.args.momentum,
+                                weight_decay=self.args.weight_decay)
+        return optimizer

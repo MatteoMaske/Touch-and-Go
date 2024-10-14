@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python LinearProbing_touch.py --dataset touch_and_go --data_folder dataset/ --save_path ckpt/material_cls --model_path ckpt/backbone/ckpt_epoch_240.pth --model resnet18t2 --classifier_path ckpt/material_cls/resnet18t2_layer5.pth --layer 5 --print_freq 1 --batch_size 16 --test_modality touch
