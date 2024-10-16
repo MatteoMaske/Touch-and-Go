@@ -10,14 +10,18 @@ import time
 from tokenize import Double
 import torch
 import torch.backends.cudnn as cudnn
+import torch.optim as optim
+import lightning as pl
 import argparse
 import socket
 import wandb
 
 from torchvision import transforms, datasets
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
 from util import adjust_learning_rate, AverageMeter
 
-from models.resnet import MyResNetsCMC
+from models.resnet import MyResNetsCMC, LightningContrastiveNet
 from NCE.NCEAverage import NCEAverage
 from NCE.NCECriterion import NCECriterion
 from NCE.NCECriterion import NCESoftmaxLoss
@@ -58,9 +62,9 @@ def parse_option():
 
     # model definition
     parser.add_argument('--model', type=str, default='alexnet', choices=[
-                                                                         'resnet50t1', 'resnet101t1', 'resnet18t1',
-                                                                         'resnet50t2', 'resnet101t2', 'resnet18t2',
-                                                                         'resnet50t3', 'resnet101t3', 'resnet18t3'])
+                                                                        'resnet50t1', 'resnet101t1', 'resnet18t1',
+                                                                        'resnet50t2', 'resnet101t2', 'resnet18t2',
+                                                                        'resnet50t3', 'resnet101t3', 'resnet18t3'])
     parser.add_argument('--softmax', action='store_true', help='using softmax contrastive loss rather than NCE')
     parser.add_argument('--nce_k', type=int, default=16384)
     parser.add_argument('--nce_t', type=float, default=0.07)
@@ -249,14 +253,14 @@ def train(epoch, train_loader, model, contrast, criterion_l, criterion_ab, optim
         # print info
         if (idx + 1) % opt.print_freq == 0:
             print('Train: [{0}][{1}/{2}]\t'
-                  'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                  'loss {loss.val:.3f} ({loss.avg:.3f})\t'
-                  'image_p {lprobs.val:.3f} ({lprobs.avg:.3f})\t'
-                  'touch_p {abprobs.val:.3f} ({abprobs.avg:.3f})'.format(
-                   epoch, idx + 1, len(train_loader), batch_time=batch_time,
-                   data_time=data_time, loss=losses, lprobs=l_prob_meter,
-                   abprobs=ab_prob_meter))
+                'BT {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                'DT {data_time.val:.3f} ({data_time.avg:.3f})\t'
+                'loss {loss.val:.3f} ({loss.avg:.3f})\t'
+                'image_p {lprobs.val:.3f} ({lprobs.avg:.3f})\t'
+                'touch_p {abprobs.val:.3f} ({abprobs.avg:.3f})'.format(
+                epoch, idx + 1, len(train_loader), batch_time=batch_time,
+                data_time=data_time, loss=losses, lprobs=l_prob_meter,
+                abprobs=ab_prob_meter))
             # print(out_l.shape)
             sys.stdout.flush()
 
@@ -295,7 +299,7 @@ def main():
                 print('==> resuming amp state_dict')
                 amp.load_state_dict(checkpoint['amp'])
             print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
+                .format(args.resume, checkpoint['epoch']))
             del checkpoint
             torch.cuda.empty_cache()
         else:
@@ -323,7 +327,7 @@ def main():
 
         time1 = time.time()
         l_loss, l_prob, ab_loss, ab_prob = train(epoch, train_loader, model, contrast, criterion_l, criterion_ab,
-                                                 optimizer, args)
+                                                optimizer, args)
         time2 = time.time()
         print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
 
@@ -353,6 +357,45 @@ def main():
     if args.wandb == True:
         wandb.finish()
 
+def train_parallelized():
+    """
+    train the model with multiple GPUs using Lightning
+    """
+    # parse the args
+    args = parse_option()
+
+    # train loader
+    train_loader, n_data = get_train_loader(args)
+
+    # model and loss function
+    model, contrast, criterion_ab, criterion_l = set_model(args, n_data)
+
+    #Logger
+    if args.wandb == True:
+        wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
+        # wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
+        # wandb.config = {
+        #     'data_amount': args.data_amount,
+        #     "learning_rate": args.learning_rate,
+        #     'epochs': args.epochs,
+        #     "lr_decay_epochs": args.lr_decay_epochs,
+        #     "batch_size": args.batch_size, 
+        #     "lr_decay_rate": args.lr_decay_rate,
+        #     "comment": args.comment
+        #     }
+        wandb.watch(model)
+
+    checkpoint_callback = ModelCheckpoint(dirpath=args.model_path, every_n_epochs=args.save_freq)
+    model = LightningContrastiveNet(model, contrast, criterion_l, criterion_ab, args)
+    trainer = pl.Trainer(accelerator="gpu", 
+                        devices=[0,1],
+                        strategy="ddp",
+                        max_epochs=args.epochs,
+                        callbacks=[checkpoint_callback],
+                        logger=wandb)
+    trainer.fit(model, train_loader)
+
 
 if __name__ == '__main__':
-    main()
+    # main()
+    train_parallelized()

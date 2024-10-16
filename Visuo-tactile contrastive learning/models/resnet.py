@@ -5,6 +5,7 @@ import numpy as np
 import torch.utils.model_zoo as model_zoo
 
 import lightning as L
+import torch.optim as optim
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -76,7 +77,7 @@ class Bottleneck(nn.Module):
         self.conv1 = nn.Conv2d(inplanes, planes, kernel_size=1, bias=False)
         self.bn1 = nn.BatchNorm2d(planes)
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
-                               padding=1, bias=False)
+                                padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
         self.bn3 = nn.BatchNorm2d(planes * 4)
@@ -424,10 +425,13 @@ class LightningContrastiveNet(L.LightningModule):
         # Compute losses
         l_loss = self.criterion_l(out_l)
         ab_loss = self.criterion_ab(out_ab)
+
+        l_prob = out_l[:, 0].mean()
+        ab_prob = out_ab[:, 0].mean()
         loss = l_loss + ab_loss
 
         # Log losses
-        self.log_dict({"train_loss": loss, "l_loss": l_loss, "ab_loss": ab_loss}, prog_bar=True, logger=True, on_step=True)
+        self.log_dict({"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}, prog_bar=True, logger=True, on_step=True)
 
         return loss
 
@@ -436,4 +440,7 @@ class LightningContrastiveNet(L.LightningModule):
                                 lr=self.args.learning_rate,
                                 momentum=self.args.momentum,
                                 weight_decay=self.args.weight_decay)
-        return optimizer
+        milestones = np.asarray(self.args.lr_decay_epochs)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=self.args.lr_decay_rate)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
+

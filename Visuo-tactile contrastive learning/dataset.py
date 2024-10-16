@@ -144,7 +144,7 @@ class TouchFolderLabel(Dataset):
             with open(os.path.join(root, 'testOF.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'pretrain':
-            with open(os.path.join(root, 'pretrain.txt'),'r') as f:
+            with open(os.path.join(root, 'pretrain_OF.txt'),'r') as f:
                 data = f.read().split('\n')
         else:
             print('Mode other than train and test')
