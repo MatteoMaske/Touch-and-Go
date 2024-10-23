@@ -42,9 +42,9 @@ class AliasMethod(object):
         for last_one in smaller+larger:
             self.prob[last_one] = 1
 
-    def cuda(self):
-        self.prob = self.prob.cuda()
-        self.alias = self.alias.cuda()
+    def cuda(self, device):
+        self.prob = self.prob.to(device)
+        self.alias = self.alias.to(device)
 
     def draw(self, N):
         """

@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from .alias_multinomial import AliasMethod
 import math
+import sys
 
 
 class NCEAverage(nn.Module):
@@ -11,7 +12,8 @@ class NCEAverage(nn.Module):
         self.nLem = outputSize
         self.unigrams = torch.ones(self.nLem)
         self.multinomial = AliasMethod(self.unigrams)
-        self.multinomial.cuda()
+        # self.multinomial.cuda()
+        self.multinomial.cuda(torch.cuda.current_device()) # Custom function from alis_multinomial.py
         self.K = K
         self.use_softmax = use_softmax
 
@@ -33,10 +35,16 @@ class NCEAverage(nn.Module):
 
         # score computation
         if idx is None:
+            self.multinomial.cuda(self.memory_l.device)
             idx = self.multinomial.draw(batchSize * (self.K + 1)).view(batchSize, -1)
             idx.select(1, 0).copy_(y.data)
         # sample
-        weight_l = torch.index_select(self.memory_l, 0, idx.view(-1)).detach()
+        assert self.memory_l.device == self.multinomial.prob.device, f'memory_l ({self.memory_l.device}) is not on the same device as self.multinomial.prob ({self.multinomial.prob.device})'
+        assert self.memory_l.device == idx.device, f'memory_l ({self.memory_l.device}) is not on the same device as idx ({idx.device})'
+        # print(torch.index_select(self.memory_l, 0, idx.view(-1)).device)
+        
+        weight_l = torch.index_select(self.memory_l, 0, idx.view(-1))
+        weight_l = weight_l.detach()
         weight_l = weight_l.view(batchSize, K + 1, inputSize)
         out_ab = torch.bmm(weight_l, ab.view(batchSize, inputSize, 1))
         # sample

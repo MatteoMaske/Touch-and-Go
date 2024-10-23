@@ -379,13 +379,13 @@ def train_parallelized():
         #     "learning_rate": args.learning_rate,
         #     'epochs': args.epochs,
         #     "lr_decay_epochs": args.lr_decay_epochs,
-        #     "batch_size": args.batch_size, 
+        #     "batch_size": args.batch_size,    
         #     "lr_decay_rate": args.lr_decay_rate,
         #     "comment": args.comment
         #     }
         wandb.watch(model)
-
-    checkpoint_callback = ModelCheckpoint(dirpath=args.model_path, every_n_epochs=args.save_freq)
+    checkpoint_name = "{epoch}-{step}-"+args.model_name
+    checkpoint_callback = ModelCheckpoint(dirpath=args.model_path, every_n_epochs=args.save_freq, filename=checkpoint_name)
     model = LightningContrastiveNet(model, contrast, criterion_l, criterion_ab, args)
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0,1],
@@ -393,7 +393,11 @@ def train_parallelized():
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback],
                         logger=wandb)
-    trainer.fit(model, train_loader)
+    if os.path.exists(args.model_path+"/epoch=119-step=3720.ckpt"):
+        trainer.fit(model, train_loader, ckpt_path="epoch=119-step=3720.ckpt")
+        print("Resuming from checkpoint")
+    else:
+        trainer.fit(model, train_loader)
 
 
 if __name__ == '__main__':
