@@ -138,10 +138,10 @@ class TouchFolderLabel(Dataset):
         self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/'
         self.mode = mode
         if mode == 'train':
-            with open(os.path.join(root, 'train.txt'),'r') as f:
+            with open(os.path.join(root, 'train_OF.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'test':
-            with open(os.path.join(root, 'testOF.txt'),'r') as f:
+            with open(os.path.join(root, 'test_OF.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'pretrain':
             with open(os.path.join(root, 'pretrain_OF.txt'),'r') as f:

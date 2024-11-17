@@ -371,7 +371,7 @@ def train_parallelized():
     model, contrast, criterion_ab, criterion_l = set_model(args, n_data)
 
     #Logger
-    if args.wandb == True:
+    if args.wandb:
         wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
         # wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
         # wandb.config = {
@@ -384,8 +384,9 @@ def train_parallelized():
         #     "comment": args.comment
         #     }
         wandb.watch(model)
-    checkpoint_name = "{epoch}-{step}-"+args.model_name
-    checkpoint_callback = ModelCheckpoint(dirpath=args.model_path, every_n_epochs=args.save_freq, filename=checkpoint_name)
+    checkpoint_name = "ckpt_epoch_{epoch}"
+    checkpoint_callback = ModelCheckpoint(dirpath=args.model_folder, every_n_epochs=args.save_freq, filename=checkpoint_name)
+    
     model = LightningContrastiveNet(model, contrast, criterion_l, criterion_ab, args)
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0,1],
@@ -393,9 +394,23 @@ def train_parallelized():
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback],
                         logger=wandb)
-    if os.path.exists(args.model_path+"/epoch=119-step=3720.ckpt"):
-        trainer.fit(model, train_loader, ckpt_path="epoch=119-step=3720.ckpt")
-        print("Resuming from checkpoint")
+    
+    # check for checkpoints to resume from
+    ckpt_path = ""
+    if len(os.listdir(args.model_folder)) > 0:
+        max_epoch = 0
+        max_epoch_file = ""
+        for file in os.listdir(args.model_folder):
+            if file.endswith(".ckpt"):
+                epoch = int(file.split("_")[-1])
+                if epoch > max_epoch:
+                    max_epoch = epoch
+                    max_epoch_file = file
+        ckpt_path = os.path.join(args.model_folder, max_epoch_file)
+    
+    if os.path.exists(ckpt_path):
+        trainer.fit(model, train_loader, ckpt_path=ckpt_path)
+        print(f"Resuming from checkpoint {ckpt_path}")
     else:
         trainer.fit(model, train_loader)
 

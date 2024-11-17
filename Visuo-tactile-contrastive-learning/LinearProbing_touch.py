@@ -13,11 +13,12 @@ import wandb
 from torchvision import transforms
 from util import adjust_learning_rate, AverageMeter, accuracy
 from models.resnet import MyResNetsCMC
-from models.LinearModel import LinearClassifierResNet
+from models.LinearModel import LinearClassifierResNet, LightningLinearProb
 from dataset import TouchFolderLabel
 
-# from spawn import spawn
-
+import lightning as pl
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint
 
 def parse_option():
 
@@ -168,12 +169,18 @@ def set_model(args):
         raise NotImplementedError('model not supported {}'.format(args.model))
 
     if args.no_ckpt == True:
-         print('==> Train from scratch')
+        print('==> Train from scratch')
     
     # load pre-trained model
     else:
         print('==> loading pre-trained model')
-        ckpt = torch.load(args.model_path)
+        # restore ckpt from the pre-trained lightning model
+        lightning_ckpt = torch.load(args.model_path)
+        ckpt = {"model": {}, "epoch": lightning_ckpt['epoch']}
+        for key in lightning_ckpt['state_dict']:
+            if key.startswith('model.'):
+                ckpt["model"][key[6:]] = lightning_ckpt['state_dict'][key]
+        
         model.load_state_dict(ckpt['model'])
         print("==> loaded checkpoint '{}' (epoch {})".format(args.model_path, ckpt['epoch']))
         print('==> done')
@@ -190,9 +197,9 @@ def set_model(args):
 
 def set_optimizer(args, classifier):
     optimizer = optim.SGD(classifier.parameters(),
-                          lr=args.learning_rate,
-                          momentum=args.momentum,
-                          weight_decay=args.weight_decay)
+                        lr=args.learning_rate,
+                        momentum=args.momentum,
+                        weight_decay=args.weight_decay)
     return optimizer
 
 
@@ -443,8 +450,65 @@ def main():
                 print('saving regular model!')
                 torch.save(state, save_name)
 
+def main_parallelized():
+    
+    args = parse_option()
+
+    # set the data loader
+    train_loader, val_loader, train_sampler = get_train_val_loader(args)
+
+    # set the model
+    backbone, classifier, criterion = set_model(args)
+    
+    checkpoint_name = "ckpt_epoch_{epoch}"
+    checkpoint_callback = ModelCheckpoint(dirpath=args.save_folder, every_n_epochs=args.save_freq, filename=checkpoint_name)
+    
+    model = LightningLinearProb(backbone, classifier, criterion, args)
+    #Logger
+    if args.wandb:
+        wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
+        # wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
+        # wandb.config = {
+        #     'data_amount': args.data_amount,
+        #     "learning_rate": args.learning_rate,
+        #     'epochs': args.epochs,
+        #     "lr_decay_epochs": args.lr_decay_epochs,
+        #     "batch_size": args.batch_size,    
+        #     "lr_decay_rate": args.lr_decay_rate,
+        #     "comment": args.comment
+        #     }
+        wandb.watch(model)
+
+    trainer = pl.Trainer(accelerator="gpu", 
+                        devices=[0],
+                        max_epochs=args.epochs,
+                        callbacks=[checkpoint_callback],
+                        logger=wandb)
+    
+    # check for checkpoints to resume from
+    ckpt_path = ""
+    if len(os.listdir(args.save_folder)) > 0:
+        max_epoch = 0
+        max_epoch_file = ""
+        for file in os.listdir(args.save_folder):
+            if file.endswith(".ckpt"):
+                epoch = int(file.split("_")[-1])
+                if epoch > max_epoch:
+                    max_epoch = epoch
+                    max_epoch_file = file
+        ckpt_path = os.path.join(args.save_folder, max_epoch_file)
+    
+    if os.path.exists(ckpt_path):
+        print(f"Resuming from checkpoint {ckpt_path}")
+        trainer.fit(model, train_loader, ckpt_path=ckpt_path)
+    else:
+        print("Training from scratch")
+        trainer.fit(model, train_loader)
+
+    trainer.validate(model, val_loader)
 
 
 if __name__ == '__main__':
     best_acc1 = 0
-    main()
+    # main()
+    main_parallelized()

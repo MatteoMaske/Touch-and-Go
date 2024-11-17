@@ -431,7 +431,8 @@ class LightningContrastiveNet(L.LightningModule):
         loss = l_loss + ab_loss
 
         # Log losses
-        self.log_dict({"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}, prog_bar=True, logger=True, on_step=True)
+        metrics = {"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}
+        self.log_dict(metrics, prog_bar=True, logger=True, on_step=True)
 
         return loss
 
