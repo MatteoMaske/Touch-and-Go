@@ -1,0 +1,7 @@
+Ceramic: 0
+Glass: 1
+Wood: 2
+Plastic: 3
+Iron: 4
+Polycarbonate: 5
+Steel: 6

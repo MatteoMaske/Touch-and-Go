@@ -1,6 +1,6 @@
 from __future__ import print_function
 from torch import channel_shuffle
-import torchmetrics.classification
+from torchmetrics.classification import Accuracy
 import torchvision
 
 import torch
@@ -60,8 +60,8 @@ class LightningLinearProb(L.LightningModule):
         self.model = model
         self.classifier = classifier
         self.criterion = criterion
-        self.top1_acc = torchmetrics.classification.MulticlassAccuracy(args.n_label, top_k=1)
-        self.top5_acc = torchmetrics.classification.MulticlassAccuracy(args.n_label, top_k=5)
+        self.top1_acc = Accuracy(task="multiclass", num_classes=args.n_label, top_k=1)
+        self.top3_acc = Accuracy(task="multiclass", num_classes=args.n_label, top_k=3)
         self.args = args
 
     def forward(self, input):
@@ -84,10 +84,10 @@ class LightningLinearProb(L.LightningModule):
         loss = self.criterion(output, target)
 
         acc1 = self.top1_acc(output, target)
-        acc5 = self.top5_acc(output, target)
+        acc3 = self.top3_acc(output, target)
 
-        metrics = {'train_loss': loss, 'top1_acc': acc1, 'top5_acc': acc5}
-        self.log_dict(metrics, on_epoch=True, prog_bar=True, logger=True)
+        metrics = {'train_loss': loss, 'top1_acc_train': acc1, 'top3_acc_train': acc3, 'lr': self.trainer.optimizers[0].param_groups[0]['lr']}
+        self.log_dict(metrics, on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
         return loss
     
@@ -99,10 +99,12 @@ class LightningLinearProb(L.LightningModule):
         loss = self.criterion(output, target)
 
         acc1 = self.top1_acc(output, target)
-        acc5 = self.top5_acc(output, target)
+        acc3 = self.top3_acc(output, target)
 
-        metrics = {'val_loss': loss, 'top1_acc': acc1, 'top5_acc': acc5}
-        self.log_dict(metrics, on_epoch=True, prog_bar=True, logger=True)
+        print(output.argmax(dim=1))
+
+        metrics = {'val_loss': loss, 'top1_acc_val': acc1, 'top3_acc_val': acc3}
+        self.log_dict(metrics, on_epoch=True, prog_bar=True, sync_dist=True)
 
         return loss
     
@@ -115,7 +117,3 @@ class LightningLinearProb(L.LightningModule):
         milestones = np.asarray(self.args.lr_decay_epochs)
         scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=self.args.lr_decay_rate)
         return {"optimizer": optimizer, "lr_scheduler": scheduler}
-    
-    # def on_train_epoch_start(self):
-    #     self.top1_acc.reset()
-    #     self.top5_acc.reset()

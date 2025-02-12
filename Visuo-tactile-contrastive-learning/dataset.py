@@ -135,13 +135,19 @@ class TouchFolderLabel(Dataset):
 
     def __init__(self, root, transform=None, target_transform=None, two_crop=False, mode='train', label='full', data_amount=100):
         self.two_crop = two_crop
-        self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/'
+        self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/' #if mode.endswith("-of") else "/media/mmlab/Volume/matteomascherin/dataset/"
         self.mode = mode
         if mode == 'train':
-            with open(os.path.join(root, 'train_OF.txt'),'r') as f:
+            with open(os.path.join(root, 'train.txt'),'r') as f:
+                data = f.read().split('\n')
+        elif mode == 'train-of':
+            with open(os.path.join(root, 'train_OF_balanced.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'test':
-            with open(os.path.join(root, 'test_OF.txt'),'r') as f:
+            with open(os.path.join(root, 'test_new_full.txt'),'r') as f:
+                data = f.read().split('\n')
+        elif mode == 'test-of':
+            with open(os.path.join(root, 'test_OF_balanced.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'pretrain':
             with open(os.path.join(root, 'pretrain_OF.txt'),'r') as f:
@@ -177,7 +183,12 @@ class TouchFolderLabel(Dataset):
         
         assert index < self.length,'index_A range error'
 
-        raw, target = self.env[index].strip().split(',') # mother path for A
+        try:
+            raw, target = self.env[index].strip().split(',')# mother path for A
+        except ValueError:
+            print(f"Trying to split '{self.env[index]}'")
+            raise ValueError('Error in reading the dataset, __getitem__')
+        
         target = int(target)
         if self.label == 'hard':
             if target == 7 or target == 8 or target == 9 or target == 11 or target == 13:

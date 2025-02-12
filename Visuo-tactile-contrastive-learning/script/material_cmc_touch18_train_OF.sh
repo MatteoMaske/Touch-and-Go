@@ -1,0 +1,1 @@
+python LinearProbing_touch.py --dataset object_folder --data_folder dataset/ --save_path ckpt/material_cls --model_path /home/matteomascherin/researchProject/ckpt/backbone/ckpt_epoch_240.pth --model resnet18t2 --learning_rate 1.0 --layer 5 --wandb --wandb_name matteomascherin-university-of-trento --batch_size 256 --num_workers 2

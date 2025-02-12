@@ -17,6 +17,7 @@ from models.LinearModel import LinearClassifierResNet, LightningLinearProb
 from dataset import TouchFolderLabel
 
 import lightning as pl
+from lightning.pytorch.strategies import DDPStrategy
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint
 
@@ -27,7 +28,7 @@ def parse_option():
     parser.add_argument('--print_freq', type=int, default=10, help='print frequency')
     parser.add_argument('--save_freq', type=int, default=5, help='save frequency')
     parser.add_argument('--batch_size', type=int, default=256, help='batch_size')
-    parser.add_argument('--num_workers', type=int, default=32, help='num of workers to use')
+    parser.add_argument('--num_workers', type=int, default=8, help='num of workers to use')
     parser.add_argument('--epochs', type=int, default=60, help='number of training epochs')
 
     # optimization
@@ -48,11 +49,12 @@ def parse_option():
                                                                          'resnet50t3', 'resnet101t3', 'resnet18t3'])
     parser.add_argument('--model_path', type=str, default=None, help='the model to test')
     parser.add_argument('--layer', type=int, default=6, help='which layer to evaluate')
+    parser.add_argument('--classifier_path', type=str, default=None, help='the classifier to test')
 
     parser.add_argument('--test_modality', type=str, default='touch', choices=['touch', 'RGB'])
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'touch_hard', 'touch_rough'])
+    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'touch_hard', 'touch_rough', 'object_folder'])
 
     # add new views
     parser.add_argument('--view', type=str, default='Touch', choices=['Touch'])
@@ -68,7 +70,7 @@ def parse_option():
     parser.add_argument('--log', type=str, default='time_linear.txt', help='log file')
 
     # GPU setting
-    parser.add_argument('--gpu', default=None, type=int, help='GPU id to use.')
+    parser.add_argument('--gpu', default=0, type=int, help='GPU id to use.')
 
     parser.add_argument('--no_ckpt', action='store_true', help='No ckpt')
 
@@ -87,10 +89,10 @@ def parse_option():
         opt.lr_decay_epochs.append(int(it))
 
     opt.model_name = opt.model_path.split('/')[-2]
-    opt.model_name = 'calibrated_{}_bsz_{}_lr_{}_decay_{}'.format(opt.model_name, opt.batch_size, opt.learning_rate,
-                                                                  opt.weight_decay)
+    opt.model_name = 'calibrated_{}_bsz_{}_lr_{}'.format(opt.model_name, opt.batch_size, opt.learning_rate)
 
-    opt.model_name = '{}_view_{}'.format(opt.model_name, opt.view)
+    # opt.model_name = '{}_view_{}'.format(opt.model_name, opt.view)
+    opt.model_name = opt.model_name + '_balanced'
 
     opt.save_folder = os.path.join(opt.save_path, opt.model_name)
     if not os.path.isdir(opt.save_folder):
@@ -98,10 +100,14 @@ def parse_option():
 
     if opt.dataset == 'touch_and_go':
         opt.n_label = 20
+    if opt.dataset == 'object_folder':
+        opt.n_label = 7
     if opt.dataset == 'touch_hard':
         opt.n_label = 2
     if opt.dataset == 'touch_rough':
         opt.n_label = 2
+
+    opt.model_name = '{}_{}_mat_{}'.format(opt.model_name, opt.dataset, opt.n_label)
 
     return opt
 
@@ -115,6 +121,8 @@ def get_train_val_loader(args):
     else:
         raise NotImplemented('view not implemented {}'.format(args.view))
 
+    #set the seed for the transform
+    torch.manual_seed(42)
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(args.crop_low, 1.)),
@@ -123,7 +131,7 @@ def get_train_val_loader(args):
         normalize,
     ])
     
-    if args.dataset == 'touch_and_go' or args.dataset == 'touch_rough' or args.dataset == 'touch_hard':
+    if args.dataset == 'touch_and_go' or args.dataset == 'touch_rough' or args.dataset == 'touch_hard' or args.dataset == 'object_folder':
         if args.dataset == 'touch_hard':
             print('hard')
             train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train', label='hard')
@@ -135,13 +143,16 @@ def get_train_val_loader(args):
         elif args.dataset == 'touch_and_go':
             train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train')
             val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test')
+        elif args.dataset == 'object_folder':
+            train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train-of')
+            val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test-of')
         else:
             raise NotImplementedError('dataset not supported {}'.format(args.dataset))
 
         print('number of train: {}'.format(len(train_dataset)))
         print('number of val: {}'.format(len(val_dataset)))
 
-        train_sampler = None
+        train_sampler = None#torch.utils.data.distributed.DistributedSampler(train_dataset)
         train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
             num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
@@ -161,6 +172,19 @@ def set_model(args):
         model = MyResNetsCMC(args.model)
         if args.model.endswith('t2'):
             classifier = LinearClassifierResNet(args.layer, args.n_label)
+            print("Instatiating LinearClassifierResNet with layer {} and n_label {}".format(args.layer, args.n_label))
+            if args.classifier_path is not None:
+                if args.classifier_path.endswith('.pth'): # torch format
+                    print('==> loading pre-trained classifier')
+                    ckpt = torch.load(args.classifier_path)
+                    classifier.load_state_dict(ckpt['classifier'])
+                    print("==> loaded classifier checkpoint '{}' (epoch {})".format(args.classifier_path, ckpt['epoch']))
+                    print('==> done')
+                else:
+                    lightning_ckpt = torch.load(args.classifier_path)
+                    classifier_state_dict = {k[11:]: v for k, v in lightning_ckpt['state_dict'].items() if k.startswith('classifier')}
+                    classifier.load_state_dict(classifier_state_dict)
+
         else:
             # Linear Probing for ResNet t1 and t3 has not been implemented
             raise NotImplementedError('model not supported {}'.format(args.model))
@@ -174,15 +198,23 @@ def set_model(args):
     # load pre-trained model
     else:
         print('==> loading pre-trained model')
-        # restore ckpt from the pre-trained lightning model
-        lightning_ckpt = torch.load(args.model_path)
-        ckpt = {"model": {}, "epoch": lightning_ckpt['epoch']}
-        for key in lightning_ckpt['state_dict']:
-            if key.startswith('model.'):
-                ckpt["model"][key[6:]] = lightning_ckpt['state_dict'][key]
+        # restore ckpt from the pre-trained model
+        if args.model_path.endswith('.pth'): # backbone weights not in lightning format
+            torch_ckpt = torch.load(args.model_path)
+            ckpt = {"model": {} }
+            for key in torch_ckpt['model']:
+                if "module." in key:
+                    ckpt['model'][key.replace("module.", "")] = torch_ckpt['model'][key]
+        else:
+            lightning_ckpt = torch.load(args.model_path)
+            ckpt = {"model": {}, "epoch": lightning_ckpt['epoch']}
+            for key in lightning_ckpt['state_dict']:
+                if key.startswith('model.'):
+                    ckpt["model"][key[6:]] = lightning_ckpt['state_dict'][key]
         
         model.load_state_dict(ckpt['model'])
-        print("==> loaded checkpoint '{}' (epoch {})".format(args.model_path, ckpt['epoch']))
+        if "epoch" in ckpt:
+            print("==> loaded checkpoint '{}' (epoch {})".format(args.model_path, ckpt['epoch']))
         print('==> done')
 
     model = model.cuda()
@@ -460,14 +492,19 @@ def main_parallelized():
     # set the model
     backbone, classifier, criterion = set_model(args)
     
-    checkpoint_name = "ckpt_epoch_{epoch}"
-    checkpoint_callback = ModelCheckpoint(dirpath=args.save_folder, every_n_epochs=args.save_freq, filename=checkpoint_name)
+    checkpoint_name = "ckpt_{epoch}"
+    checkpoint_callback = ModelCheckpoint(dirpath=args.save_folder, 
+                                        # every_n_epochs=args.save_freq,
+                                        monitor="top1_acc_train_epoch",
+                                        mode="max", # "max" for accuracy, "min" for loss
+                                        save_top_k=3, 
+                                        filename=checkpoint_name)
     
     model = LightningLinearProb(backbone, classifier, criterion, args)
     #Logger
     if args.wandb:
-        wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
-        # wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
+        wandb = WandbLogger(project="visuo-tactile-material", name=args.model_name)
+        # wandb.init(project="visuo-tactile-material", entity=args.wandb_name, name=args.model_name)
         # wandb.config = {
         #     'data_amount': args.data_amount,
         #     "learning_rate": args.learning_rate,
@@ -482,30 +519,16 @@ def main_parallelized():
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0],
                         max_epochs=args.epochs,
-                        callbacks=[checkpoint_callback],
-                        logger=wandb)
+                        callbacks=[checkpoint_callback] if args.classifier_path is None else [],
+                        logger=wandb if args.wandb else None,
+                        strategy=DDPStrategy(find_unused_parameters=True)
+                        )
     
-    # check for checkpoints to resume from
-    ckpt_path = ""
-    if len(os.listdir(args.save_folder)) > 0:
-        max_epoch = 0
-        max_epoch_file = ""
-        for file in os.listdir(args.save_folder):
-            if file.endswith(".ckpt"):
-                epoch = int(file.split("_")[-1])
-                if epoch > max_epoch:
-                    max_epoch = epoch
-                    max_epoch_file = file
-        ckpt_path = os.path.join(args.save_folder, max_epoch_file)
-    
-    if os.path.exists(ckpt_path):
-        print(f"Resuming from checkpoint {ckpt_path}")
-        trainer.fit(model, train_loader, ckpt_path=ckpt_path)
+    print("Training from scratch")
+    if args.classifier_path is None:
+        trainer.fit(model, train_loader)#, val_loader)
     else:
-        print("Training from scratch")
-        trainer.fit(model, train_loader)
-
-    trainer.validate(model, val_loader)
+        trainer.validate(model, val_loader, ckpt_path=args.classifier_path)
 
 
 if __name__ == '__main__':
