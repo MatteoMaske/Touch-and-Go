@@ -54,7 +54,7 @@ def parse_option():
     parser.add_argument('--test_modality', type=str, default='touch', choices=['touch', 'RGB'])
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'touch_hard', 'touch_rough', 'object_folder'])
+    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'touch_hard', 'touch_rough', 'object_folder', 'object_folder_balanced'])
 
     # add new views
     parser.add_argument('--view', type=str, default='Touch', choices=['Touch'])
@@ -92,7 +92,7 @@ def parse_option():
     opt.model_name = 'calibrated_{}_bsz_{}_lr_{}'.format(opt.model_name, opt.batch_size, opt.learning_rate)
 
     # opt.model_name = '{}_view_{}'.format(opt.model_name, opt.view)
-    opt.model_name = opt.model_name + '_balanced'
+    opt.model_name = opt.model_name + "_offull"
 
     opt.save_folder = os.path.join(opt.save_path, opt.model_name)
     if not os.path.isdir(opt.save_folder):
@@ -100,11 +100,11 @@ def parse_option():
 
     if opt.dataset == 'touch_and_go':
         opt.n_label = 20
-    if opt.dataset == 'object_folder':
+    elif 'object_folder' in opt.dataset:
         opt.n_label = 7
-    if opt.dataset == 'touch_hard':
+    elif opt.dataset == 'touch_hard':
         opt.n_label = 2
-    if opt.dataset == 'touch_rough':
+    elif opt.dataset == 'touch_rough':
         opt.n_label = 2
 
     opt.model_name = '{}_{}_mat_{}'.format(opt.model_name, opt.dataset, opt.n_label)
@@ -121,8 +121,6 @@ def get_train_val_loader(args):
     else:
         raise NotImplemented('view not implemented {}'.format(args.view))
 
-    #set the seed for the transform
-    torch.manual_seed(42)
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(args.crop_low, 1.)),
@@ -131,38 +129,38 @@ def get_train_val_loader(args):
         normalize,
     ])
     
-    if args.dataset == 'touch_and_go' or args.dataset == 'touch_rough' or args.dataset == 'touch_hard' or args.dataset == 'object_folder':
-        if args.dataset == 'touch_hard':
-            print('hard')
-            train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train', label='hard')
-            val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test', label='hard')
-        elif args.dataset == 'touch_rough':
-            print('rough')
-            train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train', label='rough')
-            val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test', label='rough')
-        elif args.dataset == 'touch_and_go':
-            train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train')
-            val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test')
-        elif args.dataset == 'object_folder':
-            train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train-of')
-            val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test-of')
-        else:
-            raise NotImplementedError('dataset not supported {}'.format(args.dataset))
-
-        print('number of train: {}'.format(len(train_dataset)))
-        print('number of val: {}'.format(len(val_dataset)))
-
-        train_sampler = None#torch.utils.data.distributed.DistributedSampler(train_dataset)
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
-            num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
-
-        val_loader = torch.utils.data.DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False,
-            num_workers=args.num_workers, pin_memory=True)
+    
+    if args.dataset == 'touch_hard':
+        print('hard')
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train', label='hard')
+        val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test', label='hard')
+    elif args.dataset == 'touch_rough':
+        print('rough')
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train', label='rough')
+        val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test', label='rough')
+    elif args.dataset == 'touch_and_go':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train')
+        val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test')
+    elif args.dataset == 'object_folder':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train-of')
+        val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test-of')
+    elif args.dataset == 'object_folder_balanced':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='train-of-balanced')
+        val_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='test-of-balanced')
     else:
-        print('dataset unidentified')
-        exit()
+        raise NotImplementedError('dataset not supported {}'.format(args.dataset))
+
+    print('number of train: {}'.format(len(train_dataset)))
+    print('number of val: {}'.format(len(val_dataset)))
+
+    train_sampler = None#torch.utils.data.distributed.DistributedSampler(train_dataset)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
+        num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
+
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True)
 
     return train_loader, val_loader, train_sampler
 
@@ -517,9 +515,10 @@ def main_parallelized():
         wandb.watch(model)
 
     trainer = pl.Trainer(accelerator="gpu", 
-                        devices=[0],
+                        devices=[0,1],
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback] if args.classifier_path is None else [],
+                        log_every_n_steps=10,
                         logger=wandb if args.wandb else None,
                         strategy=DDPStrategy(find_unused_parameters=True)
                         )

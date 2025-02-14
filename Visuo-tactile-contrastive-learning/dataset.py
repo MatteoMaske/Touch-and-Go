@@ -1,16 +1,17 @@
-from __future__ import print_function
-
 import numpy as np
-from skimage import color
-from PIL import Image
-
 import torch
 import torchvision.datasets as datasets
 import os
 import random
-from torch.utils.data import Dataset
+import cv2
 
+from skimage import color
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+from tqdm import tqdm
+from torch.utils.data import Dataset
 from torchvision import transforms
+from tqdm import tqdm
 
 class ImageFolderInstance(datasets.ImageFolder):
     """Folder datasets which returns the index of the image as well
@@ -135,22 +136,28 @@ class TouchFolderLabel(Dataset):
 
     def __init__(self, root, transform=None, target_transform=None, two_crop=False, mode='train', label='full', data_amount=100):
         self.two_crop = two_crop
-        self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/' #if mode.endswith("-of") else "/media/mmlab/Volume/matteomascherin/dataset/"
+        self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/' if "of" not in mode else "/media/mmlab/Volume/matteomascherin/material-classification/dataset/"
         self.mode = mode
         if mode == 'train':
             with open(os.path.join(root, 'train.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'train-of':
-            with open(os.path.join(root, 'train_OF_balanced.txt'),'r') as f:
+            with open(os.path.join(root, 'train_offull.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'test':
             with open(os.path.join(root, 'test_new_full.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'test-of':
-            with open(os.path.join(root, 'test_OF_balanced.txt'),'r') as f:
+            with open(os.path.join(root, 'test_offull.txt'),'r') as f:
                 data = f.read().split('\n')
         elif mode == 'pretrain':
             with open(os.path.join(root, 'pretrain_OF.txt'),'r') as f:
+                data = f.read().split('\n')
+        elif mode == 'train-of-balanced':
+            with open(os.path.join(root, 'train_offull_balanced.txt'),'r') as f:
+                data = f.read().split('\n')
+        elif mode == 'test-of-balanced':
+            with open(os.path.join(root, 'test_offull_balanced.txt'),'r') as f:
                 data = f.read().split('\n')
         else:
             print('Mode other than train and test')
@@ -205,8 +212,12 @@ class TouchFolderLabel(Dataset):
         A_img_path = os.path.join(dir, 'video_frame', idx)
         A_gelsight_path = os.path.join(dir, 'gelsight_frame', idx)
         
-        A_img = Image.open(A_img_path).convert('RGB')
-        A_gel = Image.open(A_gelsight_path).convert('RGB')
+        try:
+            A_img = Image.open(A_img_path).convert('RGB')
+            A_gel = Image.open(A_gelsight_path).convert('RGB')
+        except:
+            print(f"Error in opening image {A_img_path} or {A_gelsight_path}")
+            raise ValueError('Error in opening the dataset, __getitem__')
         
 
         if self.transform is not None:
@@ -223,3 +234,61 @@ class TouchFolderLabel(Dataset):
     def __len__(self):
         """Return the total number of images."""
         return self.length
+    
+def is_corrupt(image_path):
+    """Check if an image file is corrupt using PIL and OpenCV."""
+    try:
+        # PIL check
+        with Image.open(image_path) as img:
+            img.verify()  # Verify without loading
+        # OpenCV check
+        img_cv2 = cv2.imread(image_path)
+        if img_cv2 is None:
+            raise ValueError("Image could not be decoded")
+        return False  # Image is fine
+    except Exception as e:
+        print(f"Corrupt image detected: {image_path} - {e}")
+        return True
+
+if __name__ == "__main__":
+    mean= [0.485, 0.456, 0.406]
+    std= [0.229, 0.224, 0.225]
+    
+    normalize = transforms.Normalize(mean=mean, std=std)
+    train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    dataset = TouchFolderLabel(root='./dataset', mode='train-of-balanced', transform=train_transform, label='full')
+    loop = tqdm(range(len(dataset)))
+
+    # Scan dataset
+    corrupt_images = []
+    for idx in loop:
+        try:
+            out, target = dataset[idx]  # Load sample
+            
+            # Extract image paths
+            raw = dataset.env[idx].strip().split(',')[0]
+            dir, idx_name = raw.split('/')
+            dir = os.path.join(dataset.dataroot, dir)
+
+            A_img_path = os.path.join(dir, 'video_frame', idx_name)
+            A_gelsight_path = os.path.join(dir, 'gelsight_frame', idx_name)
+
+            # Check if images are corrupt
+            if is_corrupt(A_img_path) or is_corrupt(A_gelsight_path):
+                corrupt_images.append((A_img_path, A_gelsight_path))
+
+        except Exception as e:
+            print(f"Error processing index {idx}: {e}")
+
+    # Print summary
+    if corrupt_images:
+        print("\n⚠️ Corrupt images found:")
+        for img_pair in corrupt_images:
+            print(img_pair)
+    else:
+        print("✅ No corrupt images detected!")

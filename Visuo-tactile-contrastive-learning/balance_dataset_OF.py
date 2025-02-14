@@ -5,10 +5,10 @@ import random
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=str, required=True, help="Path to the file containing the list of images and their labels")
-    parser.add_argument("--method", type=str, default="median", choices=["median", "max", "min"], help="Method to balance the dataset")
+    parser.add_argument("--method", type=str, default="min", choices=["median", "max", "min"], help="Method to balance the dataset")
     return parser.parse_args()
 
-def balance_dataset(lines, method="median"):
+def balance_dataset(lines, method):
     """
     Balances the dataset by creating a new dataset with the same number of samples for each class
     The maximum number of samples per class is the median of the number of samples per class in the original dataset
