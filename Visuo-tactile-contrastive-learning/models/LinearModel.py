@@ -110,14 +110,14 @@ class LightningLinearProb(L.LightningModule):
     
     def configure_optimizers(self):
         # SGD variant
-        # optimizer = optim.SGD(self.classifier.parameters(),
-        #                     lr=self.args.learning_rate,
-        #                     momentum=self.args.momentum,
-        #                     weight_decay=self.args.weight_decay)
+        optimizer = optim.SGD(self.classifier.parameters(),
+                            lr=self.args.learning_rate,
+                            momentum=self.args.momentum,
+                            weight_decay=self.args.weight_decay)
         
-        # milestones = np.asarray(self.args.lr_decay_epochs)
-        # scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=self.args.lr_decay_rate)
-        # return {"optimizer": optimizer, "lr_scheduler": scheduler}
+        milestones = np.asarray(self.args.lr_decay_epochs)
+        scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=self.args.lr_decay_rate)
+        return {"optimizer": optimizer, "lr_scheduler": scheduler}
         # Adam variant
-        optimizer = optim.Adam(self.classifier.parameters(), lr=self.args.learning_rate)
-        return optimizer
+        # optimizer = optim.Adam(self.classifier.parameters(), lr=self.args.learning_rate)
+        # return optimizer

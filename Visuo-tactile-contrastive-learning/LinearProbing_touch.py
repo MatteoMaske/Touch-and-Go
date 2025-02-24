@@ -518,6 +518,7 @@ def main_parallelized():
                         devices=[0,1],
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback] if args.classifier_path is None else [],
+                        gradient_clip_val=0.5,
                         log_every_n_steps=10,
                         logger=wandb if args.wandb else None,
                         strategy=DDPStrategy(find_unused_parameters=True)

@@ -9,9 +9,10 @@ from skimage import color
 from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 from tqdm import tqdm
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from tqdm import tqdm
+from typing import Optional
 
 class ImageFolderInstance(datasets.ImageFolder):
     """Folder datasets which returns the index of the image as well
@@ -235,8 +236,12 @@ class TouchFolderLabel(Dataset):
         """Return the total number of images."""
         return self.length
     
-def is_corrupt(image_path):
-    """Check if an image file is corrupt using PIL and OpenCV."""
+def load_image(image_path) -> Optional[np.ndarray]:
+    """Try to load an image with PIL and OpenCV to check for corruption.
+    Returns:
+    - np.ndarray if the image is fine.
+    - False if the image is corrupt.
+    """
     try:
         # PIL check
         with Image.open(image_path) as img:
@@ -245,25 +250,36 @@ def is_corrupt(image_path):
         img_cv2 = cv2.imread(image_path)
         if img_cv2 is None:
             raise ValueError("Image could not be decoded")
-        return False  # Image is fine
+        return img_cv2  # Image is fine
     except Exception as e:
         print(f"Corrupt image detected: {image_path} - {e}")
-        return True
+        return None
 
-if __name__ == "__main__":
-    mean= [0.485, 0.456, 0.406]
-    std= [0.229, 0.224, 0.225]
-    
-    normalize = transforms.Normalize(mean=mean, std=std)
-    train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize,
-    ])
-    dataset = TouchFolderLabel(root='./dataset', mode='train-of-balanced', transform=train_transform, label='full')
+def show_batches(dataloader: DataLoader, n_batches=3):
+    """Show batches of images using matplotlib subplots"""
+    import matplotlib.pyplot as plt
+
+    dataset_name = dataloader.dataset.mode
+    os.makedirs(f'./batches/{dataset_name}', exist_ok=True)
+    folder = f'./batches/{dataset_name}'
+
+    for batch_id, batch in enumerate(dataloader):
+        images, labels = batch
+        touch_images = images[:, 3:]
+
+        fig, axs = plt.subplots(4, 8, figsize=(16, 8))
+        for i, ax in enumerate(axs.flat):
+            ax.imshow(touch_images[i].permute(1, 2, 0).numpy())
+            ax.axis('off')
+        plt.savefig(os.path.join(folder, f'batch_{batch_id}.png'))
+
+        if batch_id == n_batches - 1:
+            break
+
+def check_dataset_integrity(dataset: TouchFolderLabel):
+    """Check images integrity trying to load all the images from the given dataset"""
+
     loop = tqdm(range(len(dataset)))
-
     # Scan dataset
     corrupt_images = []
     for idx in loop:
@@ -279,11 +295,18 @@ if __name__ == "__main__":
             A_gelsight_path = os.path.join(dir, 'gelsight_frame', idx_name)
 
             # Check if images are corrupt
-            if is_corrupt(A_img_path) or is_corrupt(A_gelsight_path):
+            rgb_image = load_image(A_img_path)
+            touch_image = load_image(A_gelsight_path)
+
+            if rgb_image is None or touch_image is None:
                 corrupt_images.append((A_img_path, A_gelsight_path))
+            else:
+                touch_images.append(touch_image)
 
         except Exception as e:
             print(f"Error processing index {idx}: {e}")
+
+        show_batch(touch_images)
 
     # Print summary
     if corrupt_images:
@@ -292,3 +315,27 @@ if __name__ == "__main__":
             print(img_pair)
     else:
         print("✅ No corrupt images detected!")
+
+if __name__ == "__main__":
+    mean= [0.485, 0.456, 0.406]
+    std= [0.229, 0.224, 0.225]
+
+    np.random.seed(0)
+    torch.manual_seed(0)
+    
+    normalize = transforms.Normalize(mean=mean, std=std)
+    train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(224, scale=(0.2, 1.)),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ])
+    dataset = TouchFolderLabel(root='./dataset', mode='train-of-balanced', transform=train_transform, label='full')
+    # check_dataset_integrity(dataset)
+
+    # dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1)
+    # show_batches(dataloader, n_batches=10)
+
+    dataset = TouchFolderLabel(root='./dataset', mode='test', transform=train_transform, label='full')
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1)
+    show_batches(dataloader, n_batches=10)
