@@ -4,6 +4,9 @@ import torchvision.datasets as datasets
 import os
 import random
 import cv2
+import matplotlib.pyplot as plt
+import sys
+
 
 from skimage import color
 from PIL import Image, ImageFile
@@ -257,7 +260,6 @@ def load_image(image_path) -> Optional[np.ndarray]:
 
 def show_batches(dataloader: DataLoader, n_batches=3):
     """Show batches of images using matplotlib subplots"""
-    import matplotlib.pyplot as plt
 
     dataset_name = dataloader.dataset.mode
     os.makedirs(f'./batches/{dataset_name}', exist_ok=True)
@@ -276,12 +278,19 @@ def show_batches(dataloader: DataLoader, n_batches=3):
         if batch_id == n_batches - 1:
             break
 
-def check_dataset_integrity(dataset: TouchFolderLabel):
+def check_dataset_integrity(dataset: TouchFolderLabel, n_batches=3):
     """Check images integrity trying to load all the images from the given dataset"""
 
     loop = tqdm(range(len(dataset)))
+
+    # creating folder to save data
+    dataset_name = dataset.mode
+    os.makedirs(f'./batches/{dataset_name}', exist_ok=True)
+    folder = f'./batches/{dataset_name}'
+
     # Scan dataset
     corrupt_images = []
+    touch_images = []
     for idx in loop:
         try:
             out, target = dataset[idx]  # Load sample
@@ -306,7 +315,17 @@ def check_dataset_integrity(dataset: TouchFolderLabel):
         except Exception as e:
             print(f"Error processing index {idx}: {e}")
 
-        show_batch(touch_images)
+        if (idx+1) % 32 == 0:
+            fig, axs = plt.subplots(4, 8, figsize=(16, 8))
+            for i, ax in enumerate(axs.flat):
+                plt_image = cv2.cvtColor(touch_images[i], cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+                ax.imshow(plt_image)
+                ax.axis('off')
+            plt.savefig(os.path.join(folder, f'batch_{idx//32}_org.png'))
+            touch_images = []
+
+        if (idx+1) == n_batches * 32:
+            break
 
     # Print summary
     if corrupt_images:
@@ -322,6 +341,10 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     torch.manual_seed(0)
+    if len(sys.argv) > 1:
+        mode = sys.argv[1]
+    else:
+        mode = 'test'
     
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
@@ -330,12 +353,8 @@ if __name__ == "__main__":
         transforms.ToTensor(),
         normalize,
     ])
-    dataset = TouchFolderLabel(root='./dataset', mode='train-of-balanced', transform=train_transform, label='full')
-    # check_dataset_integrity(dataset)
+    dataset = TouchFolderLabel(root='./dataset', mode=mode, transform=train_transform, label='full')
+    check_dataset_integrity(dataset, n_batches=10)
 
-    # dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1)
-    # show_batches(dataloader, n_batches=10)
-
-    dataset = TouchFolderLabel(root='./dataset', mode='test', transform=train_transform, label='full')
     dataloader = DataLoader(dataset, batch_size=32, shuffle=False, num_workers=1)
     show_batches(dataloader, n_batches=10)
