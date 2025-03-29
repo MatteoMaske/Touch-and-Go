@@ -6,6 +6,7 @@ import torch.utils.model_zoo as model_zoo
 
 import lightning as L
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -403,7 +404,7 @@ class MyResNetsCMC(nn.Module):
         return self.encoder(x, layer)
     
 class LightningContrastiveNet(L.LightningModule):
-    def __init__(self, model, contrast, criterion_l, criterion_ab, args):
+    def __init__(self, model, args, contrast=None, criterion_l=None, criterion_ab=None):
         super().__init__()
         self.model = model
         self.contrast = contrast
@@ -415,7 +416,7 @@ class LightningContrastiveNet(L.LightningModule):
         feat_l, feat_ab = self.model(x)
         return feat_l, feat_ab
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, _):
         inputs, _, index = batch
         inputs = inputs.float()
 
@@ -435,6 +436,39 @@ class LightningContrastiveNet(L.LightningModule):
         self.log_dict(metrics, prog_bar=True, logger=True, on_step=True)
 
         return loss
+    
+    def on_test_epoch_start(self):
+        self.test_outputs = []
+
+    def test_step(self, batch, _):
+        inputs, labels, _ = batch
+        inputs = inputs.float()
+
+        # Only perform a forward pass; do not compute any losses.
+        feat_l, feat_ab = self.forward(inputs, layer=5)
+
+        return {"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels}
+    
+    #TODO: Check this functions and add TSNE to project on a 2D plane
+    def on_test_epoch_end(self):
+        # Aggregate all features and labels
+        all_feat_l = torch.cat([output["feat_l"] for output in self.test_outputs], dim=0)
+        all_labels = torch.cat([output["labels"] for output in self.test_outputs], dim=0)
+
+        # Convert to numpy for plotting
+        features_np = all_feat_l.cpu().detach().numpy()
+        labels_np = all_labels.cpu().detach().numpy()
+
+        # Plotting
+        plt.figure(figsize=(10, 8))
+        scatter = plt.scatter(features_np[:, 0], features_np[:, 1], c=labels_np, cmap='viridis', alpha=0.5)
+        plt.colorbar(scatter, label='Labels')
+        plt.xlabel('Feature 1')
+        plt.ylabel('Feature 2')
+        plt.title('Feature Visualization with Labels')
+        plt.savefig('feature_visualization.png')
+        plt.show()
+
 
     def configure_optimizers(self):
         optimizer = torch.optim.SGD(self.model.parameters(),

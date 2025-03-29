@@ -373,21 +373,12 @@ def train_parallelized():
     #Logger
     if args.wandb:
         wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
-        # wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
-        # wandb.config = {
-        #     'data_amount': args.data_amount,
-        #     "learning_rate": args.learning_rate,
-        #     'epochs': args.epochs,
-        #     "lr_decay_epochs": args.lr_decay_epochs,
-        #     "batch_size": args.batch_size,    
-        #     "lr_decay_rate": args.lr_decay_rate,
-        #     "comment": args.comment
-        #     }
         wandb.watch(model)
+
     checkpoint_name = "ckpt_epoch_{epoch}"
     checkpoint_callback = ModelCheckpoint(dirpath=args.model_folder, every_n_epochs=args.save_freq, filename=checkpoint_name)
     
-    model = LightningContrastiveNet(model, contrast, criterion_l, criterion_ab, args)
+    model = LightningContrastiveNet(model, args, contrast, criterion_l, criterion_ab)
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0,1],
                         strategy="ddp",
@@ -413,6 +404,7 @@ def train_parallelized():
         print(f"Resuming from checkpoint {ckpt_path}")
     else:
         trainer.fit(model, train_loader)
+        
 
 
 if __name__ == '__main__':
