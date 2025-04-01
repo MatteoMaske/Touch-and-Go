@@ -233,7 +233,7 @@ class TouchFolderLabel(Dataset):
 
         out = torch.cat((A_img, A_gel), dim=0)
         
-        if self.mode == 'pretrain':
+        if 'pretrain' in self.mode:
             return out, target, index
 
         return out, target

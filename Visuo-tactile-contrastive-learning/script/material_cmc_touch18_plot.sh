@@ -1,0 +1,1 @@
+python test_CMC_touch.py --dataset object_folder --data_folder dataset/ --ckpt_path /home/matteomascherin/researchProject/ckpt/backbone/of_epoch_240.ckpt --model resnet18t2 --layer 5 --batch_size 128

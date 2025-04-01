@@ -18,24 +18,21 @@ def parse_option():
     parser = argparse.ArgumentParser('Argument for testing')
 
     parser.add_argument('--batch_size', type=int, default=128, help='batch_size')
-    parser.add_argument('--num_workers', type=int, default=18, help='num of workers to use')
+    parser.add_argument('--num_workers', type=int, default=5, help='num of workers to use')
 
     # model definition
     parser.add_argument('--model', type=str, default='alexnet', choices=['resnet50t1', 'resnet101t1', 'resnet18t1',
                                                                         'resnet50t2', 'resnet101t2', 'resnet18t2',
                                                                         'resnet50t3', 'resnet101t3', 'resnet18t3'])
+    parser.add_argument('--layer', type=int, default='5', help='layer to extract features from')
     parser.add_argument('--ckpt_path', type=str, default=None, help='Path to the model')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go'])
+    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'object_folder'])
     parser.add_argument('--data_folder', type=str, default=None, help='path to data')
 
     # add new views
     parser.add_argument('--view', type=str, default='Touch', choices=['Touch'])
-
-    # mixed precision setting
-    parser.add_argument('--amp', action='store_true', help='using mixed precision')
-    parser.add_argument('--opt_level', type=str, default='O2', choices=['O1', 'O2'])
 
     # data crop threshold
     parser.add_argument('--crop_low', type=float, default=0.2, help='low area in crop')
@@ -106,7 +103,7 @@ def test():
     args = parse_option()
 
     # train loader
-    train_loader = get_test_loader(args)
+    test_loader = get_test_loader(args)
 
     # model and loss function
     model = get_model(args)
@@ -117,11 +114,13 @@ def test():
                         strategy="ddp")
     
     # Test from the checkpoint
-    print(f"Loading model from {args.resume}")
-    model.load_from_checkpoint(args.resume)
+    print(f"Loading model from {args.ckpt_path}")
+    checkpoint = torch.load(args.ckpt_path, weights_only=False)
+    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    model.eval()
 
     # Perform the test
-    trainer.test(model, train_loader)
+    trainer.test(model, test_loader)
     
     # check for checkpoints to resume from
     # ckpt_path = ""

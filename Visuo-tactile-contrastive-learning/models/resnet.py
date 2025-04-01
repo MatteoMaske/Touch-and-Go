@@ -412,8 +412,8 @@ class LightningContrastiveNet(L.LightningModule):
         self.criterion_ab = criterion_ab
         self.args = args
 
-    def forward(self, x):
-        feat_l, feat_ab = self.model(x)
+    def forward(self, x, layer=7):
+        feat_l, feat_ab = self.model(x, layer=layer)
         return feat_l, feat_ab
 
     def training_step(self, batch, _):
@@ -445,7 +445,7 @@ class LightningContrastiveNet(L.LightningModule):
         inputs = inputs.float()
 
         # Only perform a forward pass; do not compute any losses.
-        feat_l, feat_ab = self.forward(inputs, layer=5)
+        feat_l, feat_ab = self.forward(inputs, self.args.layer)
 
         return {"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels}
     
