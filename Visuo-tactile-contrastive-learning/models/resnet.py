@@ -6,7 +6,10 @@ import torch.utils.model_zoo as model_zoo
 
 import lightning as L
 import torch.optim as optim
+import torch.nn.functional as F
 import matplotlib.pyplot as plt
+
+from sklearn.manifold import TSNE
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -446,27 +449,35 @@ class LightningContrastiveNet(L.LightningModule):
 
         # Only perform a forward pass; do not compute any losses.
         feat_l, feat_ab = self.forward(inputs, self.args.layer)
+        self.test_outputs.append({"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels})
 
         return {"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels}
     
     #TODO: Check this functions and add TSNE to project on a 2D plane
     def on_test_epoch_end(self):
         # Aggregate all features and labels
-        all_feat_l = torch.cat([output["feat_l"] for output in self.test_outputs], dim=0)
+        all_feat_l = torch.cat([output["feat_l"] for output in self.test_outputs], dim=0) # (test_set_size, 512, 7, 7)
         all_labels = torch.cat([output["labels"] for output in self.test_outputs], dim=0)
 
+        # Global Average Pooling over the spatial dimensions (7, 7)
+        features_pooled = F.adaptive_avg_pool2d(all_feat_l, (1, 1))  # now shape [test_set_size, 512, 1, 1]
+        features_pooled = features_pooled.view(features_pooled.size(0), features_pooled.size(1))  # reshape to [test_set_size, 512]
+
+        # Use TSNE to project the pooled features into a 2D space
+        tsne = TSNE(n_components=2, random_state=42)
+        features_2d = tsne.fit_transform(features_pooled.cpu().detach().numpy())
+
         # Convert to numpy for plotting
-        features_np = all_feat_l.cpu().detach().numpy()
         labels_np = all_labels.cpu().detach().numpy()
 
         # Plotting
         plt.figure(figsize=(10, 8))
-        scatter = plt.scatter(features_np[:, 0], features_np[:, 1], c=labels_np, cmap='viridis', alpha=0.5)
-        plt.colorbar(scatter, label='Labels')
+        scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=labels_np, cmap='tab10', alpha=0.7)
+        plt.colorbar(scatter, ticks=range(7), label='Material ID')
         plt.xlabel('Feature 1')
         plt.ylabel('Feature 2')
-        plt.title('Feature Visualization with Labels')
-        plt.savefig('feature_visualization.png')
+        plt.title('Feature Visualization with Material Labels')
+        plt.savefig('plots/feature_visualization.png')
         plt.show()
 
 
