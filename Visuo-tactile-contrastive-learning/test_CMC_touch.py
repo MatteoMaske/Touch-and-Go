@@ -41,6 +41,10 @@ def parse_option():
 
     if not os.path.isdir(opt.data_folder) or not os.path.exists(opt.ckpt_path):
         raise ValueError(f'Data or model path not exist: {opt.data_folder} {opt.ckpt_path}')
+    
+    # Name to be used for the plot
+    backbone_dataset = opt.ckpt_path.split('/')[-1].split('_')[0]
+    opt.exp_name = f'{backbone_dataset}_backbone_{opt.dataset}_materials'
 
     return opt
 
@@ -67,6 +71,8 @@ def get_test_loader(args):
         test_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain')
     elif args.dataset == 'object_folder':
         test_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain-of')
+    elif args.dataset == 'object_folder_balanced':
+        test_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain-ofb')
     else:
         raise NotImplementedError('data loader not supported {}'.format(args.data_loader))
 
@@ -110,7 +116,7 @@ def test():
 
     model = LightningContrastiveNet(model, args)
     trainer = pl.Trainer(accelerator="gpu", 
-                        devices=[0,1],
+                        devices=[0],
                         strategy="ddp")
     
     # Test from the checkpoint

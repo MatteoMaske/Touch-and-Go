@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 import math
@@ -449,36 +450,37 @@ class LightningContrastiveNet(L.LightningModule):
 
         # Only perform a forward pass; do not compute any losses.
         feat_l, feat_ab = self.forward(inputs, self.args.layer)
-        self.test_outputs.append({"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels})
 
-        return {"feat_l": feat_l, "feat_ab": feat_ab, "labels": labels}
+        # Global Average Pooling to reduce feature map size
+        feat_l_pooled = F.adaptive_avg_pool2d(feat_l, (1, 1)).view(feat_l.size(0), -1)
+        self.test_outputs.append({"feat_l": feat_l_pooled, "labels": labels})
     
-    #TODO: Check this functions and add TSNE to project on a 2D plane
     def on_test_epoch_end(self):
-        # Aggregate all features and labels
-        all_feat_l = torch.cat([output["feat_l"] for output in self.test_outputs], dim=0) # (test_set_size, 512, 7, 7)
-        all_labels = torch.cat([output["labels"] for output in self.test_outputs], dim=0)
+        # Gather features and labels across all GPUs
+        gathered_feat_l = self.all_gather([x["feat_l"] for x in self.test_outputs])
+        gathered_labels = self.all_gather([x["labels"] for x in self.test_outputs])
 
-        # Global Average Pooling over the spatial dimensions (7, 7)
-        features_pooled = F.adaptive_avg_pool2d(all_feat_l, (1, 1))  # now shape [test_set_size, 512, 1, 1]
-        features_pooled = features_pooled.view(features_pooled.size(0), features_pooled.size(1))  # reshape to [test_set_size, 512]
+         # Ensure we are only processing data on GPU rank 0
+        if self.trainer.is_global_zero:
+            features_pooled = torch.cat(gathered_feat_l, dim=0).cpu().detach().numpy()
+            all_labels = torch.cat(gathered_labels, dim=0).cpu().detach().numpy()
 
-        # Use TSNE to project the pooled features into a 2D space
-        tsne = TSNE(n_components=2, random_state=42)
-        features_2d = tsne.fit_transform(features_pooled.cpu().detach().numpy())
+            # Use TSNE to project the pooled features into a 2D space
+            tsne = TSNE(n_components=2, random_state=42)
+            features_2d = tsne.fit_transform(features_pooled.cpu().detach().numpy())
 
-        # Convert to numpy for plotting
-        labels_np = all_labels.cpu().detach().numpy()
+            # Plotting
+            os.makedirs('plots', exist_ok=True)
+            plt.figure(figsize=(10, 8))
+            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap='Set1', alpha=0.7)
+            plt.colorbar(scatter, ticks=range(7), label=f'{self.args.dataset} Material ID')
+            plt.xlabel('Feature 1')
+            plt.ylabel('Feature 2')
+            plt.title(f'Feature Visualization from {self.args.ckpt_path} backbone with {self.args.dataset} Material Labels')
+            plt.savefig(os.path.join('plots', self.args.exp_name + '.png'), dpi=300)
+            plt.close()
+            print(f"Saved plot to {os.path.join('plots', self.args.exp_name)}")
 
-        # Plotting
-        plt.figure(figsize=(10, 8))
-        scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=labels_np, cmap='tab10', alpha=0.7)
-        plt.colorbar(scatter, ticks=range(7), label='Material ID')
-        plt.xlabel('Feature 1')
-        plt.ylabel('Feature 2')
-        plt.title('Feature Visualization with Material Labels')
-        plt.savefig('plots/feature_visualization.png')
-        plt.show()
 
 
     def configure_optimizers(self):

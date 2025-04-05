@@ -160,6 +160,9 @@ class TouchFolderLabel(Dataset):
         elif mode == 'pretrain-of':
             with open(os.path.join(root, 'pretrain_OF.txt'),'r') as f:
                 data = f.read().split('\n')
+        elif mode == 'pretrain-ofb':
+            with open(os.path.join(root, 'pretrain_OF_balanced.txt'),'r') as f:
+                data = f.read().split('\n')
         elif mode == 'train-of-balanced':
             with open(os.path.join(root, 'train_offull_balanced.txt'),'r') as f:
                 data = f.read().split('\n')
