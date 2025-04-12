@@ -1,17 +1,12 @@
-"""
-Train CMC with AlexNet
-"""
+""" Test and plot the learned features from the model trained on a Touch-and-Go contrastive network. """
 import os
 import torch
 import lightning as pl
 import argparse
-import wandb
 
 from torchvision import transforms
 from models.resnet import MyResNetsCMC, LightningContrastiveNet
 from dataset import TouchFolderLabel
-
-
 
 def parse_option():
 
@@ -24,11 +19,11 @@ def parse_option():
     parser.add_argument('--model', type=str, default='alexnet', choices=['resnet50t1', 'resnet101t1', 'resnet18t1',
                                                                         'resnet50t2', 'resnet101t2', 'resnet18t2',
                                                                         'resnet50t3', 'resnet101t3', 'resnet18t3'])
-    parser.add_argument('--layer', type=int, default='5', help='layer to extract features from')
+    parser.add_argument('--layer', type=int, default=5, help='layer to extract features from')
     parser.add_argument('--ckpt_path', type=str, default=None, help='Path to the model')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'object_folder'])
+    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'object_folder', 'object_folder_balanced'])
     parser.add_argument('--data_folder', type=str, default=None, help='path to data')
 
     # add new views
@@ -44,7 +39,8 @@ def parse_option():
     
     # Name to be used for the plot
     backbone_dataset = opt.ckpt_path.split('/')[-1].split('_')[0]
-    opt.exp_name = f'{backbone_dataset}_backbone_{opt.dataset}_materials'
+    material_dataset = "of" if "object_folder" in opt.dataset else "tg"
+    opt.exp_name = f'{backbone_dataset}_backbone_{material_dataset}_materials'
 
     return opt
 
@@ -77,10 +73,9 @@ def get_test_loader(args):
         raise NotImplementedError('data loader not supported {}'.format(args.data_loader))
 
     # test loader
-    test_sampler = None
     test_loader = torch.utils.data.DataLoader(
-        test_dataset, batch_size=args.batch_size, shuffle=(test_sampler is None),
-        num_workers=args.num_workers, pin_memory=True, sampler=test_sampler)
+        test_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.num_workers, pin_memory=True, persistent_workers=True, drop_last=True)
 
     print(f'number of samples: {len(test_dataset)}')
 
@@ -117,12 +112,29 @@ def test():
     model = LightningContrastiveNet(model, args)
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0],
-                        strategy="ddp")
+                        strategy="auto")
     
     # Test from the checkpoint
     print(f"Loading model from {args.ckpt_path}")
     checkpoint = torch.load(args.ckpt_path, weights_only=False)
-    model.load_state_dict(checkpoint['state_dict'], strict=False)
+    lightning_ckpt = {}
+    if ".ckpt" in args.ckpt_path:
+        lightning_ckpt = checkpoint['state_dict']
+        model.load_state_dict(lightning_ckpt, strict=False) # lightning format
+    else:
+        # Creating an articial checkpoint to add "model." to every key
+        for k in checkpoint['model']:
+            new_k = "model." + k
+            new_k = new_k.replace("module.", "")
+            lightning_ckpt[new_k] = checkpoint['model'][k]
+        model.load_state_dict(lightning_ckpt)
+
+    count = 0
+    for k in lightning_ckpt:
+        if k in model.state_dict():
+            count += 1 
+    print(f"Loaded {count} keys from the checkpoint")
+
     model.eval()
 
     # Perform the test

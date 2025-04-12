@@ -9,6 +9,7 @@ import lightning as L
 import torch.optim as optim
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 
 from sklearn.manifold import TSNE
 
@@ -453,6 +454,8 @@ class LightningContrastiveNet(L.LightningModule):
 
         # Global Average Pooling to reduce feature map size
         feat_l_pooled = F.adaptive_avg_pool2d(feat_l, (1, 1)).view(feat_l.size(0), -1)
+        assert feat_l_pooled.size(1) == 512, f"Expected shape (1, 512), but got {feat_l_pooled.shape}"
+
         self.test_outputs.append({"feat_l": feat_l_pooled, "labels": labels})
     
     def on_test_epoch_end(self):
@@ -460,27 +463,35 @@ class LightningContrastiveNet(L.LightningModule):
         gathered_feat_l = self.all_gather([x["feat_l"] for x in self.test_outputs])
         gathered_labels = self.all_gather([x["labels"] for x in self.test_outputs])
 
-         # Ensure we are only processing data on GPU rank 0
+        assert len(gathered_feat_l) == len(gathered_labels), "Mismatch in number of features and labels gathered."
+
+        # Ensure we are only processing data on GPU rank 0
         if self.trainer.is_global_zero:
-            features_pooled = torch.cat(gathered_feat_l, dim=0).cpu().detach().numpy()
-            all_labels = torch.cat(gathered_labels, dim=0).cpu().detach().numpy()
+            features_pooled = torch.cat([x.squeeze(0) for x in gathered_feat_l], dim=0).cpu().detach().numpy()
+            all_labels = torch.cat([x.squeeze(0) for x in gathered_labels], dim=0).cpu().detach().numpy()
+
+            print(f"Gathered {features_pooled.shape} features and {all_labels.shape} labels.")
 
             # Use TSNE to project the pooled features into a 2D space
+            print("Performing t-SNE to project features into 2D space...")
             tsne = TSNE(n_components=2, random_state=42)
-            features_2d = tsne.fit_transform(features_pooled.cpu().detach().numpy())
+            features_2d = tsne.fit_transform(features_pooled)
+
+            # Define boundaries and normalization for 7 discrete labels (0–6)
+            bounds = np.linspace(-0.5, 6.5, 8)  # Creates edges for 7 bins
+            norm = mcolors.BoundaryNorm(bounds, 7)
 
             # Plotting
             os.makedirs('plots', exist_ok=True)
             plt.figure(figsize=(10, 8))
-            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap='Set1', alpha=0.7)
+            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap='Set1', norm=norm, alpha=0.7, s=15)
             plt.colorbar(scatter, ticks=range(7), label=f'{self.args.dataset} Material ID')
             plt.xlabel('Feature 1')
             plt.ylabel('Feature 2')
-            plt.title(f'Feature Visualization from {self.args.ckpt_path} backbone with {self.args.dataset} Material Labels')
+            plt.title(f'Feature Visualization of {self.args.exp_name}')
             plt.savefig(os.path.join('plots', self.args.exp_name + '.png'), dpi=300)
             plt.close()
             print(f"Saved plot to {os.path.join('plots', self.args.exp_name)}")
-
 
 
     def configure_optimizers(self):
