@@ -42,6 +42,14 @@ def parse_option():
     material_dataset = "of" if "object_folder" in opt.dataset else "tg"
     opt.exp_name = f'{backbone_dataset}_backbone_{material_dataset}_materials'
 
+    # Set the number of materials
+    if "object_folder" in opt.dataset:
+        opt.num_classes = 7
+    elif "touch_and_go" in opt.dataset:
+        opt.num_classes = 20
+    else:
+        raise ValueError(f'num materials not set for dataset {opt.dataset}')
+
     return opt
 
 
@@ -54,7 +62,7 @@ def get_test_loader(args):
         mean=(0.485, 0.456, 0.406)
         std=(0.229, 0.224, 0.225)
     else:
-        raise NotImplemented('view not implemented {}'.format(args.view))
+        raise ValueError('view not implemented {}'.format(args.view))
     
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
@@ -95,6 +103,30 @@ def get_model(args):
 
     return model
 
+def load_model(model, ckpt_path):
+    """Load the model from the checkpoint"""
+
+    print(f"Loading model from {ckpt_path}")
+    checkpoint = torch.load(ckpt_path, weights_only=False)
+    lightning_ckpt = {}
+
+    if ".ckpt" in ckpt_path:
+        lightning_ckpt = checkpoint['state_dict']
+        model.load_state_dict(lightning_ckpt, strict=False) # lightning format
+    else:
+        # Creating an articial checkpoint to add "model." to every key
+        for k in checkpoint['model']:
+            new_k = "model." + k
+            new_k = new_k.replace("module.", "")
+            lightning_ckpt[new_k] = checkpoint['model'][k]
+        model.load_state_dict(lightning_ckpt)
+
+    count = 0
+    for k in lightning_ckpt:
+        if k in model.state_dict():
+            count += 1 
+    print(f"Loaded {count} keys from the checkpoint")
+
 
 def test():
     """
@@ -114,51 +146,11 @@ def test():
                         devices=[0],
                         strategy="auto")
     
-    # Test from the checkpoint
-    print(f"Loading model from {args.ckpt_path}")
-    checkpoint = torch.load(args.ckpt_path, weights_only=False)
-    lightning_ckpt = {}
-    if ".ckpt" in args.ckpt_path:
-        lightning_ckpt = checkpoint['state_dict']
-        model.load_state_dict(lightning_ckpt, strict=False) # lightning format
-    else:
-        # Creating an articial checkpoint to add "model." to every key
-        for k in checkpoint['model']:
-            new_k = "model." + k
-            new_k = new_k.replace("module.", "")
-            lightning_ckpt[new_k] = checkpoint['model'][k]
-        model.load_state_dict(lightning_ckpt)
-
-    count = 0
-    for k in lightning_ckpt:
-        if k in model.state_dict():
-            count += 1 
-    print(f"Loaded {count} keys from the checkpoint")
-
+    load_model(model, args.ckpt_path)
     model.eval()
 
     # Perform the test
     trainer.test(model, test_loader)
-    
-    # check for checkpoints to resume from
-    # ckpt_path = ""
-    # if len(os.listdir(args.model_folder)) > 0:
-    #     max_epoch = 0
-    #     max_epoch_file = ""
-    #     for file in os.listdir(args.model_folder):
-    #         if file.endswith(".ckpt"):
-    #             epoch = int(file.split("_")[-1])
-    #             if epoch > max_epoch:
-    #                 max_epoch = epoch
-    #                 max_epoch_file = file
-    #     ckpt_path = os.path.join(args.model_folder, max_epoch_file)
-    
-    # if os.path.exists(ckpt_path):
-    #     trainer.fit(model, train_loader, ckpt_path=ckpt_path)
-    #     print(f"Resuming from checkpoint {ckpt_path}")
-    # else:
-    #     trainer.fit(model, train_loader)
-        
 
 
 if __name__ == '__main__':

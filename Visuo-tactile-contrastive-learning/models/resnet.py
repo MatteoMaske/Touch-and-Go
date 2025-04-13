@@ -477,15 +477,21 @@ class LightningContrastiveNet(L.LightningModule):
             tsne = TSNE(n_components=2, random_state=42)
             features_2d = tsne.fit_transform(features_pooled)
 
-            # Define boundaries and normalization for 7 discrete labels (0–6)
-            bounds = np.linspace(-0.5, 6.5, 8)  # Creates edges for 7 bins
-            norm = mcolors.BoundaryNorm(bounds, 7)
+            # Setting color mapping for labels
+            num_classes = self.args.num_classes
+            base_cmap = plt.get_cmap('tab20')
+            colors = base_cmap(np.linspace(0, 1, 20))[:num_classes]
+            cmap = mcolors.ListedColormap(colors)
+
+            # Boundaries for color mapping
+            bounds = np.linspace(-0.5, num_classes - 0.5, num_classes + 1)
+            norm = mcolors.BoundaryNorm(bounds, cmap.N)
 
             # Plotting
             os.makedirs('plots', exist_ok=True)
             plt.figure(figsize=(10, 8))
-            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap='Set1', norm=norm, alpha=0.7, s=15)
-            plt.colorbar(scatter, ticks=range(7), label=f'{self.args.dataset} Material ID')
+            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap=cmap, norm=norm, alpha=0.7, s=15)
+            plt.colorbar(scatter, ticks=range(num_classes), label=f'{self.args.dataset} Material ID')
             plt.xlabel('Feature 1')
             plt.ylabel('Feature 2')
             plt.title(f'Feature Visualization of {self.args.exp_name}')
