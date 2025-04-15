@@ -138,7 +138,7 @@ class TouchFolderLabel(Dataset):
     """Folder datasets which returns the index of the image as well
     """
 
-    def __init__(self, root, transform=None, target_transform=None, two_crop=False, mode='train', label='full', data_amount=100):
+    def __init__(self, root, transform=None, target_transform=None, two_crop=False, mode='train', label='full'):
         self.two_crop = two_crop
         self.dataroot = '/media/mmlab/Volume/matteomascherin/touch_and_go/dataset/' if "of" not in mode else "/media/mmlab/Volume/matteomascherin/material-classification/dataset/"
         self.mode = mode
@@ -181,14 +181,11 @@ class TouchFolderLabel(Dataset):
             with open(os.path.join(root, 'test_rough.txt'),'r') as f:
                 data = f.read().split('\n')
 
-        
         self.length = len(data)
         self.env = data
         self.transform = transform
         self.target_transform = target_transform
         self.label = label
-
-
 
     def __getitem__(self, index):
         """
@@ -229,7 +226,6 @@ class TouchFolderLabel(Dataset):
             print(f"Error in opening image {A_img_path} or {A_gelsight_path}")
             raise ValueError('Error in opening the dataset, __getitem__')
         
-
         if self.transform is not None:
             A_img = self.transform(A_img)
             A_gel = self.transform(A_gel)
@@ -244,7 +240,10 @@ class TouchFolderLabel(Dataset):
     def __len__(self):
         """Return the total number of images."""
         return self.length
-    
+
+
+""" -------- Some utils function to test the dataset ---------- """
+
 def load_image(image_path) -> Optional[np.ndarray]:
     """Try to load an image with PIL and OpenCV to check for corruption.
     Returns:

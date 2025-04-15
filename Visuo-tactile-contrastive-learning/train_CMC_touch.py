@@ -2,18 +2,14 @@
 Train CMC with AlexNet
 """
 from __future__ import print_function
-from ast import arg
 
 import os
 import sys
 import time
-from tokenize import Double
 import torch
 import torch.backends.cudnn as cudnn
-import torch.optim as optim
 import lightning as pl
 import argparse
-import socket
 import wandb
 
 from torchvision import transforms, datasets
@@ -25,16 +21,9 @@ from models.resnet import MyResNetsCMC, LightningContrastiveNet
 from NCE.NCEAverage import NCEAverage
 from NCE.NCECriterion import NCECriterion
 from NCE.NCECriterion import NCESoftmaxLoss
+from NCE.sup_con_loss import SupConLoss
 
 from dataset import TouchFolderLabel
-
-try:
-    from apex import amp, optimizers
-except ImportError:
-    pass
-"""
-TODO: python 3.6 ModuleNotFoundError
-"""
 
 
 def parse_option():
@@ -72,15 +61,14 @@ def parse_option():
     parser.add_argument('--feat_dim', type=int, default=128, help='dim of feat for inner product')
 
     # dataset
-    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go'])
+    parser.add_argument('--dataset', type=str, default='touch_and_go', choices=['touch_and_go', 'object_folder', 'object_folder_balanced'],)
 
     # specify folder
     parser.add_argument('--data_folder', type=str, default=None, help='path to data')
-    parser.add_argument('--data_loader', type=str, default='touch_and_go', choices=['touch_and_go'])
     parser.add_argument('--model_path', type=str, default=None, help='path to save model')
 
     # add new views
-    parser.add_argument('--view', type=str, default='Touch', choices=['Touch'])
+    parser.add_argument('--view', type=str, default='touch', choices=['touch', 'visual'])
 
     # mixed precision setting
     parser.add_argument('--amp', action='store_true', help='using mixed precision')
@@ -90,7 +78,6 @@ def parse_option():
     parser.add_argument('--crop_low', type=float, default=0.2, help='low area in crop')
 
     # data amount
-    parser.add_argument('--data_amount', type=int, default=100, help='how much data used')
     parser.add_argument('--comment', type=str, default='', help='comment')
 
     # wandb
@@ -109,8 +96,17 @@ def parse_option():
         opt.lr_decay_epochs.append(int(it))
 
     opt.method = 'softmax' if opt.softmax else 'nce'
-    opt.model_name = 'memory_{}_{}_{}_lr_{}_decay_{}_bsz_{}_amount{}_comment{}'.format(opt.method, opt.nce_k, opt.model, opt.learning_rate,
-                                                                    opt.weight_decay, opt.batch_size, opt.data_amount, opt.comment)
+    if opt.dataset == 'object_folder_balanced':
+        dataset = "ofb"
+    elif opt.dataset == 'object_folder':
+        dataset = "of"
+    elif opt.dataset == 'touch_and_go':
+        dataset = "tg"
+    else:
+        raise ValueError('dataset not supported {}'.format(opt.dataset))
+
+    opt.model_name = 'memory_{}_{}_{}_lr_{}_decay_{}_bsz_{}_dataset_{}'.format(opt.method, opt.nce_k, opt.model, opt.learning_rate,
+                                                                    opt.weight_decay, opt.batch_size, dataset)
 
     if opt.amp:
         opt.model_name = '{}_amp_{}'.format(opt.model_name, opt.opt_level)
@@ -129,14 +125,14 @@ def parse_option():
 
 def get_train_loader(args):
     """get the train loader"""
-    # data_folder = os.path.join(args.data_folder, 'train')
     data_folder = args.data_folder
 
-    if args.view == 'Touch':
+    if args.view == 'Touch' or args.view == 'Vision':
         mean=(0.485, 0.456, 0.406)
         std=(0.229, 0.224, 0.225)
     else:
-        raise NotImplemented('view not implemented {}'.format(args.view))
+        raise ValueError('view not implemented {}'.format(args.view))
+
     normalize = transforms.Normalize(mean=mean, std=std)
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(args.crop_low, 1.)),
@@ -144,14 +140,18 @@ def get_train_loader(args):
         transforms.ToTensor(),
         normalize,
     ])
-    if args.data_loader == 'touch_and_go':
-        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain', data_amount=args.data_amount)
-    else:
-        raise NotImplementedError('data loader not supported {}'.format(args.data_loader))
-    train_sampler = None
-    # exit()
 
+    if args.dataset == 'touch_and_go':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain')
+    elif args.dataset == 'object_folder':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain-of')
+    elif args.dataset == 'object_folder_balanced':
+        train_dataset = TouchFolderLabel(data_folder, transform=train_transform, mode='pretrain-ofb')
+    else:
+        raise NotImplementedError('data loader not supported {}'.format(args.dataset))
+    
     # train loader
+    train_sampler = None
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=(train_sampler is None),
         num_workers=args.num_workers, pin_memory=True, sampler=train_sampler)
@@ -170,9 +170,13 @@ def set_model(args, n_data):
     else:
         raise ValueError('model not supported yet {}'.format(args.model))
 
+    # NCE loss - from original paper
     contrast = NCEAverage(args.feat_dim, n_data, args.nce_k, args.nce_t, args.nce_m, args.softmax)
     criterion_l = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
     criterion_ab = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+
+    # Supervised Contrastive Loss
+    # contrast = SupConLoss()
 
     if torch.cuda.is_available():
         model = model.cuda()
@@ -309,7 +313,6 @@ def main():
     if args.wandb == True:
         wandb.init(project="visuo-tactile-cmc", entity=args.wandb_name, name=args.model_name)
         wandb.config = {
-            'data_amount': args.data_amount,
             "learning_rate": args.learning_rate,
             'epochs': args.epochs,
             "lr_decay_epochs": args.lr_decay_epochs,
@@ -375,8 +378,12 @@ def train_parallelized():
         wandb = WandbLogger(project="visuo-tactile-cmc", name=args.model_name)
         wandb.watch(model)
 
-    checkpoint_name = "ckpt_epoch_{epoch}"
-    checkpoint_callback = ModelCheckpoint(dirpath=args.model_folder, every_n_epochs=args.save_freq, filename=checkpoint_name)
+    checkpoint_name = "ckpt_{epoch}_{step}"
+    checkpoint_callback = ModelCheckpoint(dirpath=args.model_folder, 
+                                        monitor="train_loss",
+                                        mode="min", # "max" for accuracy, "min" for loss
+                                        save_top_k=3, 
+                                        filename=checkpoint_name)
     
     model = LightningContrastiveNet(model, args, contrast, criterion_l, criterion_ab)
     trainer = pl.Trainer(accelerator="gpu", 
@@ -384,27 +391,14 @@ def train_parallelized():
                         strategy="ddp",
                         max_epochs=args.epochs,
                         callbacks=[checkpoint_callback],
-                        logger=wandb)
+                        logger=wandb if args.wandb else None)
     
-    # check for checkpoints to resume from
-    ckpt_path = ""
-    if len(os.listdir(args.model_folder)) > 0:
-        max_epoch = 0
-        max_epoch_file = ""
-        for file in os.listdir(args.model_folder):
-            if file.endswith(".ckpt"):
-                epoch = int(file.split("_")[-1])
-                if epoch > max_epoch:
-                    max_epoch = epoch
-                    max_epoch_file = file
-        ckpt_path = os.path.join(args.model_folder, max_epoch_file)
-    
-    if os.path.exists(ckpt_path):
+    if args.resume and os.path.exists(args.resume):
+        ckpt_path = args.resume
         trainer.fit(model, train_loader, ckpt_path=ckpt_path)
         print(f"Resuming from checkpoint {ckpt_path}")
     else:
         trainer.fit(model, train_loader)
-        
 
 
 if __name__ == '__main__':

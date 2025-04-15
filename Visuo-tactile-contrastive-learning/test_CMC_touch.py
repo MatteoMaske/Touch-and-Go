@@ -27,7 +27,7 @@ def parse_option():
     parser.add_argument('--data_folder', type=str, default=None, help='path to data')
 
     # add new views
-    parser.add_argument('--view', type=str, default='Touch', choices=['Touch'])
+    parser.add_argument('--view', type=str, default='touch', choices=['touch', 'visual'], help='view to use for the test')
 
     # data crop threshold
     parser.add_argument('--crop_low', type=float, default=0.2, help='low area in crop')
@@ -39,8 +39,15 @@ def parse_option():
     
     # Name to be used for the plot
     backbone_dataset = opt.ckpt_path.split('/')[-1].split('_')[0]
-    material_dataset = "of" if "object_folder" in opt.dataset else "tg"
-    opt.exp_name = f'{backbone_dataset}_backbone_{material_dataset}_materials'
+    if "object_folder_balanced" == opt.dataset:
+        material_dataset = "ofb"
+    elif "object_folder" == opt.dataset:
+        material_dataset = "of"
+    elif "touch_and_go" == opt.dataset:
+        material_dataset = "tg"
+    else:
+        raise ValueError(f'Unknown dataset {opt.dataset}')
+    opt.exp_name = f'{backbone_dataset}_backbone_{material_dataset}_dataset_{opt.view}'
 
     # Set the number of materials
     if "object_folder" in opt.dataset:
@@ -58,7 +65,7 @@ def get_test_loader(args):
 
     data_folder = args.data_folder
 
-    if args.view == 'Touch':
+    if args.view == 'touch' or args.view == 'visual':
         mean=(0.485, 0.456, 0.406)
         std=(0.229, 0.224, 0.225)
     else:

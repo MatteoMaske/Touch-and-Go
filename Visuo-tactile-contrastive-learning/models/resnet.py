@@ -438,7 +438,7 @@ class LightningContrastiveNet(L.LightningModule):
 
         # Log losses
         metrics = {"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}
-        self.log_dict(metrics, prog_bar=True, logger=True, on_step=True)
+        self.log_dict(metrics, prog_bar=True, logger=self.args.wandb, on_step=True)
 
         return loss
     
@@ -453,27 +453,30 @@ class LightningContrastiveNet(L.LightningModule):
         feat_l, feat_ab = self.forward(inputs, self.args.layer)
 
         # Global Average Pooling to reduce feature map size
-        feat_l_pooled = F.adaptive_avg_pool2d(feat_l, (1, 1)).view(feat_l.size(0), -1)
-        assert feat_l_pooled.size(1) == 512, f"Expected shape (1, 512), but got {feat_l_pooled.shape}"
+        if self.args.view == 'Vision':
+            feat_pooled = F.adaptive_avg_pool2d(feat_l, (1, 1)).view(feat_l.size(0), -1)
+        else:
+            feat_pooled = F.adaptive_avg_pool2d(feat_ab, (1, 1)).view(feat_ab.size(0), -1)
+        assert feat_pooled.size(1) == 512, f"Expected shape (1, 512), but got {feat_pooled.shape}"
 
-        self.test_outputs.append({"feat_l": feat_l_pooled, "labels": labels})
+        self.test_outputs.append({"features": feat_pooled, "labels": labels})
     
     def on_test_epoch_end(self):
         # Gather features and labels across all GPUs
-        gathered_feat_l = self.all_gather([x["feat_l"] for x in self.test_outputs])
+        gathered_features = self.all_gather([x["features"] for x in self.test_outputs])
         gathered_labels = self.all_gather([x["labels"] for x in self.test_outputs])
 
-        assert len(gathered_feat_l) == len(gathered_labels), "Mismatch in number of features and labels gathered."
+        assert len(gathered_features) == len(gathered_labels), "Mismatch in number of features and labels gathered."
 
         # Ensure we are only processing data on GPU rank 0
         if self.trainer.is_global_zero:
-            features_pooled = torch.cat([x.squeeze(0) for x in gathered_feat_l], dim=0).cpu().detach().numpy()
+            features_pooled = torch.cat([x.squeeze(0) for x in gathered_features], dim=0).cpu().detach().numpy()
             all_labels = torch.cat([x.squeeze(0) for x in gathered_labels], dim=0).cpu().detach().numpy()
 
             print(f"Gathered {features_pooled.shape} features and {all_labels.shape} labels.")
 
             # Use TSNE to project the pooled features into a 2D space
-            print("Performing t-SNE to project features into 2D space...")
+            print(f"Performing t-SNE to project {self.args.view} features into 2D space...")
             tsne = TSNE(n_components=2, random_state=42)
             features_2d = tsne.fit_transform(features_pooled)
 
@@ -490,7 +493,7 @@ class LightningContrastiveNet(L.LightningModule):
             # Plotting
             os.makedirs('plots', exist_ok=True)
             plt.figure(figsize=(10, 8))
-            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap=cmap, norm=norm, alpha=0.7, s=15)
+            scatter = plt.scatter(features_2d[:, 0], features_2d[:, 1], c=all_labels, cmap=cmap, norm=norm, alpha=0.7, s=10)
             plt.colorbar(scatter, ticks=range(num_classes), label=f'{self.args.dataset} Material ID')
             plt.xlabel('Feature 1')
             plt.ylabel('Feature 2')
