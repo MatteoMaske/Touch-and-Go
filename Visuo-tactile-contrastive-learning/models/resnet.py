@@ -409,35 +409,41 @@ class MyResNetsCMC(nn.Module):
         return self.encoder(x, layer)
     
 class LightningContrastiveNet(L.LightningModule):
-    def __init__(self, model, args, contrast=None, criterion_l=None, criterion_ab=None):
+    def __init__(self, model, args, contrastive_criterion=None):
         super().__init__()
         self.model = model
-        self.contrast = contrast
-        self.criterion_l = criterion_l
-        self.criterion_ab = criterion_ab
         self.args = args
+        self.contrastive_criterion = contrastive_criterion
 
     def forward(self, x, layer=7):
         feat_l, feat_ab = self.model(x, layer=layer)
         return feat_l, feat_ab
 
     def training_step(self, batch, _):
-        inputs, _, index = batch
+        inputs, labels, index = batch
         inputs = inputs.float()
 
         feat_l, feat_ab = self.forward(inputs)
-        out_l, out_ab = self.contrast(feat_l, feat_ab, index)
 
         # Compute losses
-        l_loss = self.criterion_l(out_l)
-        ab_loss = self.criterion_ab(out_ab)
+        assert self.contrastive_criterion is not None, "Contrastive criterion must be defined."
 
-        l_prob = out_l[:, 0].mean()
-        ab_prob = out_ab[:, 0].mean()
-        loss = l_loss + ab_loss
+        if self.args.supconloss:
+            features = torch.cat([feat_l.unsqueeze(1), feat_ab.unsqueeze(1)], dim=1)
+            loss = self.contrastive_criterion(features, labels)
+            metrics = {"train_loss": loss}
+        else:
+            contrast, criterion_l, criterion_ab = self.contrastive_criterion
+            out_l, out_ab = contrast(feat_l, feat_ab, index)
+            l_loss = criterion_l(out_l)
+            ab_loss = criterion_ab(out_ab)
 
-        # Log losses
-        metrics = {"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}
+            l_prob = out_l[:, 0].mean()
+            ab_prob = out_ab[:, 0].mean()
+
+            loss = l_loss + ab_loss
+            metrics = {"train_loss": loss, "l_loss": l_loss, "l_prob": l_prob, "ab_loss": ab_loss, "ab_prob": ab_prob}
+
         self.log_dict(metrics, prog_bar=True, logger=self.args.wandb, on_step=True)
 
         return loss

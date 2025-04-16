@@ -1,1 +1,1 @@
-python test_CMC_touch.py --dataset object_folder_balanced --data_folder dataset/ --ckpt_path /home/matteomascherin/researchProject/ckpt/backbone/tg_epoch_240.pth --model resnet18t2 --layer 5 --batch_size 128
+python test_CMC_touch.py --dataset touch_and_go --data_folder dataset/ --ckpt_path /home/matteomascherin/researchProject/ckpt/backbone/tg_supcon_epoch_240.pth --model resnet18t2 --layer 5 --batch_size 128

@@ -54,7 +54,8 @@ def parse_option():
                                                                         'resnet50t1', 'resnet101t1', 'resnet18t1',
                                                                         'resnet50t2', 'resnet101t2', 'resnet18t2',
                                                                         'resnet50t3', 'resnet101t3', 'resnet18t3'])
-    parser.add_argument('--softmax', action='store_true', help='using softmax contrastive loss rather than NCE')
+    # parser.add_argument('--softmax', action='store_true', help='using softmax contrastive loss rather than NCE')
+    parser.add_argument('--supconloss', action='store_true', help='using Supervised Contrastive Loss rather than NCE')
     parser.add_argument('--nce_k', type=int, default=16384)
     parser.add_argument('--nce_t', type=float, default=0.07)
     parser.add_argument('--nce_m', type=float, default=0.5)
@@ -95,7 +96,10 @@ def parse_option():
     for it in iterations:
         opt.lr_decay_epochs.append(int(it))
 
-    opt.method = 'softmax' if opt.softmax else 'nce'
+    opt.method = 'supcon' if opt.supconloss else 'nce'
+    if opt.supconloss:
+        opt.nce_k = 0
+
     if opt.dataset == 'object_folder_balanced':
         dataset = "ofb"
     elif opt.dataset == 'object_folder':
@@ -127,7 +131,7 @@ def get_train_loader(args):
     """get the train loader"""
     data_folder = args.data_folder
 
-    if args.view == 'Touch' or args.view == 'Vision':
+    if args.view == 'touch' or args.view == 'vision':
         mean=(0.485, 0.456, 0.406)
         std=(0.229, 0.224, 0.225)
     else:
@@ -170,22 +174,29 @@ def set_model(args, n_data):
     else:
         raise ValueError('model not supported yet {}'.format(args.model))
 
-    # NCE loss - from original paper
-    contrast = NCEAverage(args.feat_dim, n_data, args.nce_k, args.nce_t, args.nce_m, args.softmax)
-    criterion_l = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
-    criterion_ab = NCESoftmaxLoss() if args.softmax else NCECriterion(n_data)
+    if args.supconloss:
+        # Supervised Contrastive Loss
+        contrastive_criterion = SupConLoss()
+    else:
+        # NCE loss - from original paper
+        contrast = NCEAverage(args.feat_dim, n_data, args.nce_k, args.nce_t, args.nce_m, False)
+        criterion_l = NCECriterion(n_data)
+        criterion_ab = NCECriterion(n_data)
+        contrastive_criterion = (contrast, criterion_l, criterion_ab)
 
-    # Supervised Contrastive Loss
-    # contrast = SupConLoss()
+    print(f"Current loss function: {contrastive_criterion}")
 
     if torch.cuda.is_available():
         model = model.cuda()
-        contrast = contrast.cuda()
-        criterion_ab = criterion_ab.cuda()
-        criterion_l = criterion_l.cuda()
+        if args.supconloss:
+            contrastive_criterion = contrastive_criterion.cuda()
+        else:
+            contrastive_criterion[0] = contrastive_criterion[0].cuda()
+            contrastive_criterion[1] = contrastive_criterion[1].cuda()
+            contrastive_criterion[2] = contrastive_criterion[2].cuda()
         cudnn.benchmark = True
 
-    return model, contrast, criterion_ab, criterion_l
+    return model, contrastive_criterion
 
 
 def set_optimizer(args, model):
@@ -371,7 +382,7 @@ def train_parallelized():
     train_loader, n_data = get_train_loader(args)
 
     # model and loss function
-    model, contrast, criterion_ab, criterion_l = set_model(args, n_data)
+    model, contrastive_criterion = set_model(args, n_data)
 
     #Logger
     if args.wandb:
@@ -385,7 +396,7 @@ def train_parallelized():
                                         save_top_k=3, 
                                         filename=checkpoint_name)
     
-    model = LightningContrastiveNet(model, args, contrast, criterion_l, criterion_ab)
+    model = LightningContrastiveNet(model, args, contrastive_criterion)
     trainer = pl.Trainer(accelerator="gpu", 
                         devices=[0,1],
                         strategy="ddp",

@@ -3,3 +3,4 @@ tmux.txt
 wandb/
 ckpt/
 batches/
+*.log

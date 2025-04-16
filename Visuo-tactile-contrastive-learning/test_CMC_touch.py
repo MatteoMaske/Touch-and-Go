@@ -38,7 +38,7 @@ def parse_option():
         raise ValueError(f'Data or model path not exist: {opt.data_folder} {opt.ckpt_path}')
     
     # Name to be used for the plot
-    backbone_dataset = opt.ckpt_path.split('/')[-1].split('_')[0]
+    backbone_dataset = opt.ckpt_path.split('/')[-1].split('_epoch_')[0]
     if "object_folder_balanced" == opt.dataset:
         material_dataset = "ofb"
     elif "object_folder" == opt.dataset:
